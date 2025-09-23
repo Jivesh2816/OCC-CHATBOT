@@ -1,0 +1,18 @@
+# Ignore the frontend dependencies
+/frontend/node_modules
+
+# Ignore the backend dependencies
+/backend/node_modules
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE files (e.g., VS Code)
+.vscode/
+
+# Ignore log files and temporary files
+*.log
+npm-debug.log*
+.env
+.env.local
