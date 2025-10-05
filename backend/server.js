@@ -115,10 +115,8 @@ function getIntelligentResponse(message) {
 
 function findMostRelevantFAQ(question) {
   const message = question.toLowerCase().trim();
-  const allFAQs = [];
-  Object.entries(faqData).forEach(([category, faqs]) => {
-    faqs.forEach(faq => allFAQs.push({ ...faq, category }));
-  });
+  // FAQ is now a simple array of objects with question/answer properties
+  const allFAQs = Array.isArray(faqData) ? faqData : [];
   let bestMatch = null;
   let bestScore = 0;
   for (const faq of allFAQs) {
