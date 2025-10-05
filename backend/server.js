@@ -166,6 +166,8 @@ app.post('/chat', async (req, res) => {
     chatHistory.push({ role: 'user', content: message, timestamp: new Date() });
 
     const faqAnswer = searchFAQ(message);
+    console.log('Searching for:', message);
+    console.log('FAQ Answer found:', !!faqAnswer);
     let botResponse, source;
     if (faqAnswer) {
       botResponse = faqAnswer;
@@ -183,6 +185,7 @@ app.post('/chat', async (req, res) => {
     }
 
     chatHistory.push({ role: 'bot', content: botResponse, timestamp: new Date() });
+    console.log('Sending response:', { response: botResponse.substring(0, 100) + '...', source });
     res.json({ response: botResponse, history: chatHistory.slice(-10), source });
   } catch (error) {
     console.error('Error processing chat:', error);

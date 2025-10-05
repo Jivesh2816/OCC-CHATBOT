@@ -170,7 +170,7 @@ const Chatbot = () => {
     setIsLoading(true)
 
     try {
-      const response = await axios.post('https://occ-chatbot.vercel.app/chat', {
+      const response = await axios.post('http://localhost:5000/chat', {
         message: message
       })
 
@@ -229,7 +229,7 @@ const Chatbot = () => {
 
   const clearHistory = async () => {
     try {
-      await axios.delete('https://occ-chatbot.vercel.app/history')
+      await axios.delete('http://localhost:5000/history')
       setMessages([
         {
           role: 'bot',
