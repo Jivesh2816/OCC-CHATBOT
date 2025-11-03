@@ -3,6 +3,11 @@ import axios from 'axios'
 import './Chatbot.css'
 
 const Chatbot = () => {
+  const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL ||
+    (typeof window !== 'undefined' && window.location.hostname === 'localhost'
+      ? '/api'
+      : 'https://occ-chatbot.vercel.app')
   const [messages, setMessages] = useState([
     {
       role: 'bot',
@@ -194,7 +199,7 @@ const Chatbot = () => {
     setIsLoading(true)
 
     try {
-      const response = await axios.post('http://localhost:5000/chat', {
+      const response = await axios.post(`${API_BASE_URL}/chat`, {
         message: message
       })
 
@@ -253,7 +258,7 @@ const Chatbot = () => {
 
   const clearHistory = async () => {
     try {
-      await axios.delete('http://localhost:5000/history')
+      await axios.delete(`${API_BASE_URL}/history`)
       setMessages([
         {
           role: 'bot',
