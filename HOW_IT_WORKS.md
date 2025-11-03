@@ -211,14 +211,14 @@ const [showSubcategories, setShowSubcategories] = useState(false)
 
 ### **Backend (.env)**
 ```bash
-GOOGLE_API_KEY=your_api_key_here
+GROQ_API_KEY=your_api_key_here
 PORT=5000
 NODE_ENV=production
 ```
 
 ### **Vercel Configuration**
 Environment variables set in Vercel dashboard:
-- `GOOGLE_API_KEY`
+- `GROQ_API_KEY`
 - `PORT`
 - `NODE_ENV`
 
