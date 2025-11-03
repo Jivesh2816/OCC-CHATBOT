@@ -4,15 +4,17 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-// Google Gemini
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const genAI = process.env.GOOGLE_API_KEY ? new GoogleGenerativeAI(process.env.GOOGLE_API_KEY) : null;
+// Groq AI
+const Groq = require('groq-sdk');
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY
+});
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Diagnostics for env
-console.log('Gemini enabled:', !!process.env.GOOGLE_API_KEY);
+console.log('Groq enabled:', !!process.env.GROQ_API_KEY);
 
 // Load FAQ data
 let faqData = {};
@@ -32,19 +34,45 @@ app.use(express.json());
 // Simple in-memory storage for demo purposes
 let chatHistory = [];
 
-// Gemini helper
-async function generateWithGemini(prompt, maxOutputTokens = 512) {
-  if (!genAI) throw new Error('Missing GOOGLE_API_KEY');
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-  const result = await model.generateContent({
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: {
+// Groq helper
+async function generateWithGroq(message, faqContext = '') {
+  try {
+    const prompt = faqContext 
+      ? `You are a helpful assistant for University of Waterloo off-campus students.
+
+Here are relevant FAQs:
+${faqContext}
+
+Student question: ${message}
+
+Provide a helpful, friendly answer based on the FAQs above. If the FAQs don't cover it, use your knowledge but stay focused on student life at UWaterloo. Be empathetic and action-oriented.`
+      : `You are a helpful assistant for University of Waterloo off-campus students. 
+
+Student question: ${message}
+
+Provide a helpful, friendly, and practical answer about off-campus student life at UWaterloo. Be empathetic and action-oriented.`;
+
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: "You are a helpful assistant for University of Waterloo off-campus students."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      model: "llama-3.3-70b-versatile",
       temperature: 0.7,
-      maxOutputTokens
-    }
-  });
-  const text = result.response.text();
-  return (text || '').trim();
+      max_tokens: 1024,
+    });
+
+    return completion.choices[0]?.message?.content?.trim() || "Sorry, I couldn't generate a response.";
+  } catch (error) {
+    console.error('Groq API Error:', error);
+    return null;
+  }
 }
 
 // Function to search FAQ for matching questions
@@ -145,6 +173,50 @@ function findMostRelevantFAQ(question) {
   return { faq: bestMatch, confidence: bestScore };
 }
 
+// Function to find top N relevant FAQs for context
+function findRelevantFAQs(question, topN = 3) {
+  const message = question.toLowerCase().trim();
+  const allFAQs = Array.isArray(faqData) ? faqData : [];
+  
+  // Score all FAQs
+  const scoredFAQs = allFAQs.map(faq => {
+    const fq = faq.question.toLowerCase();
+    let score = 0;
+    
+    // Exact match
+    if (fq === message) score = 100;
+    // Off-campus specific
+    else if (message.includes('off-campus') && fq.includes('off-campus')) score = 95;
+    else if (message.includes('food') && message.includes('off-campus') && fq.includes('food') && fq.includes('off-campus')) score = 95;
+    // Residence specific
+    else if (message.includes('residence') && fq.includes('residence')) score = 90;
+    else if (message.includes('food') && message.includes('residence') && fq.includes('food') && fq.includes('residence')) score = 90;
+    // Food specific
+    else if (message.includes('food') && fq.includes('food')) score = 80;
+    // Partial match
+    else if (fq.includes(message) || message.includes(fq)) {
+      const overlap = Math.min(message.length, fq.length) / Math.max(message.length, fq.length);
+      score = overlap > 0.6 ? 70 : 40;
+    } 
+    // Word-based matching
+    else {
+      const m = message.split(' ').filter(w => w.length > 2);
+      const qw = fq.split(' ').filter(w => w.length > 2);
+      const matches = m.filter(w => qw.some(qw2 => qw2.includes(w) || w.includes(qw2)));
+      if (matches.length > 0) {
+        const ratio = matches.length / Math.max(m.length, qw.length);
+        score = ratio >= 0.5 ? 60 : 30;
+      }
+    }
+    
+    return { faq, score };
+  });
+  
+  // Sort by score descending and return top N
+  scoredFAQs.sort((a, b) => b.score - a.score);
+  return scoredFAQs.slice(0, topN).filter(item => item.score > 0).map(item => item.faq);
+}
+
 function generateConversationalResponse(question, faqEntry) {
   const options = [
     `Based on the information I have: ${faqEntry.answer}`,
@@ -165,28 +237,63 @@ app.post('/chat', async (req, res) => {
 
     chatHistory.push({ role: 'user', content: message, timestamp: new Date() });
 
-    const faqAnswer = searchFAQ(message);
-    console.log('Searching for:', message);
-    console.log('FAQ Answer found:', !!faqAnswer);
-    let botResponse, source;
-    if (faqAnswer) {
-      botResponse = faqAnswer;
-      source = 'faq';
-    } else {
-      const prompt = `You are a helpful assistant for University of Waterloo students.\nQuestion: ${message}\nAnswer:`;
-      try {
-        botResponse = await generateWithGemini(prompt, 400);
-        source = 'gemini_general';
-      } catch (e) {
-        console.error('Gemini error (/chat):', e?.message || e);
+    console.log('Processing question:', message);
+
+    // Find relevant FAQs for context
+    const relevantFAQs = findRelevantFAQs(message, 3);
+    console.log('Found relevant FAQs:', relevantFAQs.length);
+
+    // Build context from FAQs
+    const context = relevantFAQs.map(faq => 
+      `Q: ${faq.question}\nA: ${faq.answer}`
+    ).join('\n\n');
+
+    let botResponse, source, metadata;
+    
+    try {
+      // Try Groq with FAQ context
+      botResponse = await generateWithGroq(message, context);
+      source = 'groq_with_faq_context';
+      metadata = {
+        relevantFAQs: relevantFAQs.map(f => f.question),
+        faqCount: relevantFAQs.length
+      };
+      console.log('Groq generated response with FAQ context');
+      
+      // Handle Groq error response
+      if (!botResponse || botResponse.includes("Sorry, I couldn't generate")) {
+        throw new Error('Groq returned empty response');
+      }
+    } catch (groqError) {
+      console.error('Groq error:', groqError?.message || groqError);
+      
+      // Fallback to direct FAQ match
+      const faqAnswer = searchFAQ(message);
+      if (faqAnswer) {
+        botResponse = faqAnswer;
+        source = 'faq_fallback';
+        console.log('Used FAQ fallback');
+      } else {
         botResponse = getIntelligentResponse(message);
         source = 'intelligent_response';
+        console.log('Used intelligent response fallback');
       }
+      metadata = { error: 'groq_failed' };
     }
 
     chatHistory.push({ role: 'bot', content: botResponse, timestamp: new Date() });
-    console.log('Sending response:', { response: botResponse.substring(0, 100) + '...', source });
-    res.json({ response: botResponse, history: chatHistory.slice(-10), source });
+    console.log('Sending response:', { 
+      source, 
+      preview: botResponse.substring(0, 100) + '...',
+      metadata 
+    });
+    
+    res.json({ 
+      response: botResponse, 
+      history: chatHistory.slice(-10), 
+      source,
+      metadata 
+    });
   } catch (error) {
     console.error('Error processing chat:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -209,12 +316,11 @@ app.post('/ask', async (req, res) => {
 
     const match = findMostRelevantFAQ(question);
     if (!match.faq) {
-      const prompt = `You are a helpful assistant for University of Waterloo students.\nQuestion: ${question}\nAnswer:`;
       try {
-        const answer = await generateWithGemini(prompt, 512);
-        return res.json({ answer, source: 'gemini_general', confidence: 0 });
+        const answer = await generateWithGroq(question);
+        return res.json({ answer, source: 'groq_general', confidence: 0 });
       } catch (e) {
-        console.error('Gemini error (/ask, no FAQ):', e?.message || e);
+        console.error('Groq error (/ask, no FAQ):', e?.message || e);
         const answer = getIntelligentResponse(question);
         return res.json({ answer, source: 'intelligent_response', confidence: 0 });
       }
@@ -223,12 +329,12 @@ app.post('/ask', async (req, res) => {
     if (match.confidence >= 0.85) {
       return res.json({ answer: match.faq.answer, source: 'faq', confidence: match.confidence });
     } else {
-      const context = `You are a helpful assistant for University of Waterloo students.\nUse the FAQ to answer naturally.\nFAQ: ${match.faq.question} -> ${match.faq.answer}\nUser: ${question}\nAssistant:`;
+      const context = `Q: ${match.faq.question}\nA: ${match.faq.answer}`;
       try {
-        const answer = await generateWithGemini(context, 512);
-        return res.json({ answer, source: 'gemini_enhanced', confidence: match.confidence });
+        const answer = await generateWithGroq(question, context);
+        return res.json({ answer, source: 'groq_enhanced', confidence: match.confidence });
       } catch (e) {
-        console.error('Gemini error (/ask, enhance):', e?.message || e);
+        console.error('Groq error (/ask, enhance):', e?.message || e);
         const answer = generateConversationalResponse(question, match.faq);
         return res.json({ answer, source: 'faq_fallback', confidence: match.confidence });
       }

@@ -15,6 +15,7 @@ const Chatbot = () => {
   const [showCategories, setShowCategories] = useState(true)
   const [showSubcategories, setShowSubcategories] = useState(false)
   const [currentCategory, setCurrentCategory] = useState('')
+  const [textInput, setTextInput] = useState('')
   const messagesEndRef = useRef(null)
 
   const categories = {
@@ -166,11 +167,34 @@ const Chatbot = () => {
     sendMessageToBackend(subcategory)
   }
 
+  const handleTextInput = async (userMessage) => {
+    if (!userMessage.trim()) return // Don't send empty messages
+    
+    // Hide categories when user sends text
+    setShowCategories(false)
+    setShowSubcategories(false)
+    
+    // Clear input
+    setTextInput('')
+    
+    // Add user message
+    const userMessageObj = {
+      role: 'user',
+      content: userMessage,
+      timestamp: new Date()
+    }
+    
+    setMessages(prev => [...prev, userMessageObj])
+    
+    // Send to backend
+    await sendMessageToBackend(userMessage)
+  }
+
   const sendMessageToBackend = async (message) => {
     setIsLoading(true)
 
     try {
-      const response = await axios.post('https://occ-chatbot.vercel.app/chat', {
+      const response = await axios.post('http://localhost:5000/chat', {
         message: message
       })
 
@@ -229,7 +253,7 @@ const Chatbot = () => {
 
   const clearHistory = async () => {
     try {
-      await axios.delete('https://occ-chatbot.vercel.app/history')
+      await axios.delete('http://localhost:5000/history')
       setMessages([
         {
           role: 'bot',
@@ -280,6 +304,31 @@ const Chatbot = () => {
                       <span className="category-text">{categoryName}</span>
                     </button>
                   ))}
+                </div>
+              )}
+
+              {/* Text input section */}
+              {message.showCategories && (
+                <div className="text-input-section">
+                  <p className="text-input-label">Or type your question:</p>
+                  <div className="text-input-container">
+                    <input
+                      type="text"
+                      placeholder="Ask me anything about off-campus living..."
+                      value={textInput}
+                      onChange={(e) => setTextInput(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleTextInput(textInput)}
+                      className="text-input"
+                      disabled={isLoading}
+                    />
+                    <button 
+                      onClick={() => handleTextInput(textInput)}
+                      className="text-input-button"
+                      disabled={isLoading}
+                    >
+                      Send
+                    </button>
+                  </div>
                 </div>
               )}
               
