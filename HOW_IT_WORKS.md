@@ -33,12 +33,12 @@ Chatbot/
 ### **Backend**
 - **Runtime**: Node.js
 - **Framework**: Express.js
-- **AI Integration**: Google Gemini API
+- **AI Integration**: Groq API (Llama 3.3 70B)
 - **Dependencies**:
   - `express` - Web server
   - `cors` - Cross-origin resource sharing
   - `dotenv` - Environment variable management
-  - `@google/generative-ai` - AI responses
+  - `groq-sdk` - AI responses
   - `nodemon` - Development server auto-reload
 
 ### **Frontend**
@@ -74,7 +74,7 @@ The chatbot uses a comprehensive FAQ knowledge base stored as a JSON array:
 The backend uses sophisticated matching systems:
 
 #### **A. Context Builder: `findRelevantFAQs()`** ⭐ NEW!
-Finds top 3 most relevant FAQs to provide as context to Gemini:
+Finds top 3 most relevant FAQs to provide as context to Groq:
 
 ```javascript
 function findRelevantFAQs(question, topN = 3) {
@@ -120,7 +120,7 @@ if (matchingWords.length / messageWords.length >= threshold) {
 
 ### **3. Response Generation Flow**
 
-**NEW FLOW** (Gemini as Primary with FAQ Context):
+**CURRENT FLOW** (Groq as Primary with FAQ Context):
 
 ```
 User Question
@@ -129,9 +129,9 @@ findRelevantFAQs() - Find top 3 matching FAQs
      ↓
 Build context from FAQs
      ↓
-generateWithGemini() - AI generation WITH FAQ context
+generateWithGroq() - AI generation WITH FAQ context
      ↓
-Success? → YES → Return Gemini answer
+Success? → YES → Return Groq answer
      ↓
      NO (API Error)
      ↓
@@ -146,15 +146,16 @@ Fallback 2: getIntelligentResponse() - Smart default
 Return Response
 ```
 
-**Key Improvement**: Gemini now uses your FAQ knowledge base as context, creating more natural, conversational responses while maintaining accuracy!
+**Key Feature**: Groq (Llama 3.3 70B) uses your FAQ knowledge base as context, creating more natural, conversational responses while maintaining accuracy!
 
 ### **4. User Interface Design**
 
-#### **Category-Based Navigation**
-Instead of free-form text input, users interact through:
+#### **Dual Input Methods**
+Users can interact through TWO ways:
 1. **Category Buttons** - 9 main categories with emojis
 2. **Subcategory Buttons** - Specific questions within categories
-3. **Action Options** - "Browse Categories Again" or "Ask Something Else"
+3. **Free Text Input** - Type any question naturally
+4. **Action Options** - "Browse Categories Again" or "Ask Something Else"
 
 #### **State Management**
 ```javascript
@@ -180,7 +181,7 @@ const [showSubcategories, setShowSubcategories] = useState(false)
   ```json
   {
     "response": "bot answer",
-    "source": "faq|gemini_general|intelligent_response",
+    "source": "faq|groq_with_faq_context|groq_general|intelligent_response",
     "history": [...]
   }
   ```
@@ -358,17 +359,16 @@ app.use(cors());
 **Problem**: Frontend had no `package.json`
 **Solution**: Created complete React + Vite setup
 
-### **5. Gemini Integration Upgrade** ⭐ LATEST!
-**Problem**: Gemini was only used as fallback, FAQ answers were static
-**Solution**: Re-architected to use Gemini as PRIMARY responder with FAQ as knowledge base
+### **5. Groq AI Integration Upgrade** ⭐ LATEST!
+**Problem**: Gemini was unreliable and slow, FAQ answers were static
+**Solution**: Re-architected to use Groq (Llama 3.3 70B) as PRIMARY responder with FAQ as knowledge base
 ```javascript
-// NEW: Gemini-first approach
+// NEW: Groq-first approach with FAQ context
 const relevantFAQs = findRelevantFAQs(message, 3);
 const context = relevantFAQs.map(faq => `Q: ${faq.question}\nA: ${faq.answer}`).join('\n\n');
-const prompt = `Use these FAQs as context... ${context}`;
-const answer = await generateWithGemini(prompt, 800);
+const answer = await generateWithGroq(message, context);
 ```
-**Impact**: More natural, conversational responses while maintaining FAQ accuracy!
+**Impact**: Faster, more reliable, and natural conversational responses while maintaining FAQ accuracy!
 
 ---
 
@@ -386,7 +386,7 @@ const answer = await generateWithGemini(prompt, 800);
 - Actionable next steps
 
 ### **3. Intelligent Response Generation** ⭐ UPDATED!
-- **Primary**: Gemini with FAQ context (natural, conversational)
+- **Primary**: Groq (Llama 3.3 70B) with FAQ context (natural, conversational, fast)
 - **Fallback 1**: Direct FAQ match (fast, accurate)
 - **Fallback 2**: Intelligent defaults (basic help)
 - Always returns a helpful response
@@ -404,7 +404,7 @@ const answer = await generateWithGemini(prompt, 800);
 - **Categories**: 9 main topics
 - **Subcategories**: 3-7 per category
 - **Coverage**: Food, Housing, Legal, Transportation, Health, Clubs, Academic, Storage, Bylaws
-- **Response Sources**: FAQ (primary), Gemini AI (fallback), Intelligent responses (last resort)
+- **Response Sources**: Groq AI (Llama 3.3 70B) with FAQ context (primary), Direct FAQ (fallback), Intelligent responses (last resort)
 
 ---
 
@@ -445,7 +445,7 @@ const answer = await generateWithGemini(prompt, 800);
 ## 🤝 **Credits**
 
 - **Framework**: React, Express.js
-- **AI**: Google Gemini API
+- **AI**: Groq API (Llama 3.3 70B)
 - **Deployment**: Vercel
 - **Database**: JSON file (knowledge base)
 - **Styling**: Custom CSS
