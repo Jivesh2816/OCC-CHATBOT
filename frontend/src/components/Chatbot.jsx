@@ -156,7 +156,7 @@ const Chatbot = () => {
           <div className="sidebar-tagline">Answers for students living off campus, drawn from the OCC knowledge base.</div>
           <div className="status-line">
             <span className="status-dot" />
-            Answering from {totalFAQs} FAQs · Groq Llama 3.3 70B
+            Answering from {totalFAQs} FAQs · Groq GPT-OSS 20B
           </div>
         </div>
 

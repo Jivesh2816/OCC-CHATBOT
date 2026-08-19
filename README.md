@@ -4,7 +4,7 @@ Answers housing, rent, transit, health, food, and campus-bylaw questions for Uni
 
 **Live demo:** _add your deployed frontend URL here_ · **Backend API:** [occ-chatbot.vercel.app](https://occ-chatbot.vercel.app)
 
-![Node](https://img.shields.io/badge/Node-Express-000?logo=node.js&logoColor=white) ![React](https://img.shields.io/badge/React_18-Vite-149eca?logo=react&logoColor=white) ![Groq](https://img.shields.io/badge/Groq-Llama_3.3_70B-orange) ![Vercel](https://img.shields.io/badge/Deploy-Vercel-black?logo=vercel&logoColor=white)
+![Node](https://img.shields.io/badge/Node-Express-000?logo=node.js&logoColor=white) ![React](https://img.shields.io/badge/React_18-Vite-149eca?logo=react&logoColor=white) ![Groq](https://img.shields.io/badge/Groq-GPT--OSS_20B-orange) ![Vercel](https://img.shields.io/badge/Deploy-Vercel-black?logo=vercel&logoColor=white)
 
 ## What it looks like
 
@@ -23,7 +23,7 @@ The tag under every answer (`OCC · Housing & Leases`) names the real FAQ catego
 ```mermaid
 flowchart LR
     U[User message] --> R[findRelevantFAQs\nscore all 42 entries]
-    R --> G[Groq · Llama 3.3 70B\nanswers grounded in top-3 FAQ context]
+    R --> G[Groq · GPT-OSS 20B\nanswers grounded in top-3 FAQ context]
     G -->|succeeds, FAQ matched| T1[Tag: real category]
     G -->|succeeds, no FAQ matched| T2[Tag: fallback\nno alert]
     G -->|Groq unreachable| S[searchFAQ\ndirect/fuzzy match]
@@ -38,7 +38,7 @@ Full write-up: [HOW_IT_WORKS.md](HOW_IT_WORKS.md).
 
 ## Tech stack
 
-Express · Groq SDK (Llama 3.3 70B) · React 18 + Vite · plain CSS (no framework) · Vercel (two projects: `backend/`, `frontend/`)
+Express · Groq SDK (GPT-OSS 20B) · React 18 + Vite · plain CSS (no framework) · Vercel (two projects: `backend/`, `frontend/`)
 
 ## Running locally
 

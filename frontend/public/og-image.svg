@@ -19,7 +19,7 @@
 
   <g class="mono" font-size="16" fill="#f5f3ec">
     <circle cx="150" cy="410" r="5" fill="#e0932f"/>
-    <text x="168" y="415">42 FAQs answered live &#183; Groq Llama 3.3 70B</text>
+    <text x="168" y="415">42 FAQs answered live &#183; Groq GPT-OSS 20B</text>
   </g>
 
   <g class="mono" font-size="15" fill="#5d5c56">

@@ -52,7 +52,7 @@ POST /chat  { message }
 findRelevantFAQs()  — score all 42 entries, take the top 3 as context
      │
      ▼
-generateWithGroq()  — Llama 3.3 70B answers, grounded in that FAQ context
+generateWithGroq()  — GPT-OSS 20B answers, grounded in that FAQ context
      │
      ├─ succeeds, and a relevant FAQ was found → matchType: "faq", category from the top match
      ├─ succeeds, but no FAQ scored above 0    → matchType: "fallback" (general knowledge, no FAQ backing)
