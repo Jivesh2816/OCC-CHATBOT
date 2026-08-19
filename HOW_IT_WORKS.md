@@ -1,456 +1,91 @@
-# OCC CHATBOT - Technical Summary
+# OCC Chatbot — How It Works
 
-## 🎯 **Project Overview**
-The OCC CHATBOT is an interactive web application designed to help off-campus University of Waterloo students navigate campus resources, housing, legal rights, food options, and community services. Built with a Node.js backend and React frontend, deployed on Vercel.
+## Overview
 
----
+OCC Chatbot answers off-campus-living questions for University of Waterloo students — housing, rent, transit, health, food, and campus bylaws. It's a two-part app: an Express API (`backend/`) and a React + Vite frontend (`frontend/`), deployed as two separate Vercel projects.
 
-## 🏗️ **Architecture**
+## Architecture
 
-### **Monorepo Structure**
 ```
 Chatbot/
-├── backend/          # Node.js Express API server
-│   ├── server.js     # Main Express application
-│   ├── faq.json      # Knowledge base (170+ questions)
-│   ├── vercel.json   # Vercel deployment config
-│   └── .env          # Environment variables
-│
-└── frontend/         # React + Vite frontend
-    ├── src/
-    │   ├── components/
-    │   │   ├── Chatbot.jsx   # Main chatbot component
-    │   │   └── Chatbot.css   # UI styling
-    │   ├── App.jsx           # React entry point
-    │   └── main.jsx          # Vite entry point
-    └── vite.config.js        # Vite proxy configuration
+├── backend/
+│   ├── server.js      # All chat logic: FAQ matching, Groq calls, routes
+│   ├── faq.json        # Knowledge base — 42 Q&A entries, each tagged with a category
+│   └── vercel.json
+└── frontend/
+    ├── src/components/Chatbot.jsx   # Sidebar + chat UI, all app state
+    ├── src/components/Chatbot.css
+    └── public/                      # favicon, OG image
 ```
 
----
+## Knowledge base
 
-## 🔧 **Technology Stack**
+`faq.json` is a flat array of 42 entries:
 
-### **Backend**
-- **Runtime**: Node.js
-- **Framework**: Express.js
-- **AI Integration**: Groq API (Llama 3.3 70B)
-- **Dependencies**:
-  - `express` - Web server
-  - `cors` - Cross-origin resource sharing
-  - `dotenv` - Environment variable management
-  - `groq-sdk` - AI responses
-  - `nodemon` - Development server auto-reload
-
-### **Frontend**
-- **Framework**: React 18
-- **Build Tool**: Vite 5
-- **HTTP Client**: Axios
-- **Styling**: Custom CSS with gradients
-
-### **Deployment**
-- **Platform**: Vercel
-- **Backend**: Serverless Node.js functions
-- **Frontend**: Static site hosting
-
----
-
-## 🧠 **How It Works**
-
-### **1. Knowledge Base System (FAQ.json)**
-The chatbot uses a comprehensive FAQ knowledge base stored as a JSON array:
-```json
-[
-  {
-    "question": "What are the best budget food options on campus?",
-    "answer": "Here's your UWaterloo Budget Eater's Manifesto! 💰..."
-  }
-]
-```
-- **170+ questions** across 9 categories
-- Covering food, housing, legal, utilities, health, clubs, academic resources, storage, and bylaws
-
-### **2. Multi-Layer Matching Algorithm**
-
-The backend uses sophisticated matching systems:
-
-#### **A. Context Builder: `findRelevantFAQs()`** ⭐ NEW!
-Finds top 3 most relevant FAQs to provide as context to Groq:
-
-```javascript
-function findRelevantFAQs(question, topN = 3) {
-  // Score all FAQs based on relevance
-  // - Exact match: 100 points
-  // - Off-campus topics: 95 points
-  // - Residence topics: 90 points
-  // - Food topics: 80 points
-  // - Partial matches: 70-40 points
-  // - Word matches: 60-30 points
-  
-  // Sort by score, return top N
-}
-```
-
-#### **B. Direct FAQ Search: `searchFAQ()`**
-For fallback scenarios, uses 3-tier matching:
-
-**Tier 1: Exact Match**
-```javascript
-// Direct question match
-if (question === message) return answer;
-```
-
-**Tier 2: Phrase Match**
-```javascript
-// Partial phrase matching with quality check
-if (question.includes(message) || message.includes(question)) {
-  if (messageWords.length >= 2 && questionWords.length >= 2) {
-    return answer;
-  }
-}
-```
-
-**Tier 3: Word-Based Matching**
-```javascript
-// Fuzzy matching with threshold
-const threshold = messageWords.length >= 5 ? 0.7 : 0.6;
-if (matchingWords.length / messageWords.length >= threshold) {
-  return answer;
-}
-```
-
-### **3. Response Generation Flow**
-
-**CURRENT FLOW** (Groq as Primary with FAQ Context):
-
-```
-User Question
-     ↓
-findRelevantFAQs() - Find top 3 matching FAQs
-     ↓
-Build context from FAQs
-     ↓
-generateWithGroq() - AI generation WITH FAQ context
-     ↓
-Success? → YES → Return Groq answer
-     ↓
-     NO (API Error)
-     ↓
-Fallback 1: searchFAQ() - Direct FAQ match
-     ↓
-Found? → YES → Return FAQ
-     ↓
-     NO
-     ↓
-Fallback 2: getIntelligentResponse() - Smart default
-     ↓
-Return Response
-```
-
-**Key Feature**: Groq (Llama 3.3 70B) uses your FAQ knowledge base as context, creating more natural, conversational responses while maintaining accuracy!
-
-### **4. User Interface Design**
-
-#### **Dual Input Methods**
-Users can interact through TWO ways:
-1. **Category Buttons** - 9 main categories with emojis
-2. **Subcategory Buttons** - Specific questions within categories
-3. **Free Text Input** - Type any question naturally
-4. **Action Options** - "Browse Categories Again" or "Ask Something Else"
-
-#### **State Management**
-```javascript
-const [messages, setMessages] = useState([...])
-const [showCategories, setShowCategories] = useState(true)
-const [showSubcategories, setShowSubcategories] = useState(false)
-```
-
----
-
-## 🌐 **API Endpoints**
-
-### **Backend Routes** (`server.js`)
-
-#### **GET /** 
-- Health check endpoint
-- Returns: `{ message: 'Chatbot API is running!' }`
-
-#### **POST /chat**
-- Main chat endpoint
-- **Request**: `{ message: "user question" }`
-- **Response**: 
-  ```json
-  {
-    "response": "bot answer",
-    "source": "faq|groq_with_faq_context|groq_general|intelligent_response",
-    "history": [...]
-  }
-  ```
-
-#### **POST /ask**
-- Alternative ask endpoint with confidence scoring
-- **Response**:
-  ```json
-  {
-    "answer": "bot answer",
-    "source": "...",
-    "confidence": 0.85
-  }
-  ```
-
-#### **GET /history**
-- Retrieve chat history
-- Returns: `{ history: [...] }`
-
-#### **DELETE /history**
-- Clear chat history
-- Returns: `{ message: 'Chat history cleared' }`
-
----
-
-## 🔐 **Environment Variables**
-
-### **Backend (.env)**
-```bash
-GROQ_API_KEY=your_api_key_here
-PORT=5000
-NODE_ENV=production
-```
-
-### **Vercel Configuration**
-Environment variables set in Vercel dashboard:
-- `GROQ_API_KEY`
-- `PORT`
-- `NODE_ENV`
-
----
-
-## 🎨 **UI/UX Features**
-
-### **Color Scheme**
-- **Background**: Blue-teal gradient (`#030d46` → `#b4240a`)
-- **Category Colors**: 
-  - Food: `#FF7A7A`
-  - Housing: `#4FC3F7`
-  - Legal: `#42A5F5`
-  - Transportation: `#29B6F6`
-  - Health: `#66BB6A`
-  - Clubs: `#FF7043`
-  - Academic: `#26C6DA`
-  - Storage: `#AB47BC`
-  - Bylaws: `#8D6E63`
-
-### **Interactive Elements**
-- Smooth scrolling to latest message
-- Loading spinner during API calls
-- Timestamps on all messages
-- Source labels showing answer origin
-- Clear chat button
-
----
-
-## 🚀 **Deployment Configuration**
-
-### **Vercel Setup** (`backend/vercel.json`)
 ```json
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "server.js",
-      "use": "@vercel/node"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "server.js"
-    }
-  ]
+  "question": "My landlord won't fix maintenance issues",
+  "category": "Housing & Leases",
+  "answer": "..."
 }
 ```
 
-### **Project Settings**
-- **Root Directory**: `backend/`
-- **Build Command**: `npm install`
-- **Output Directory**: Not applicable (Node.js server)
-- **Framework Preset**: Other
+Each entry belongs to one of 8 categories. Six are promoted as nav topics in the UI (sidebar on desktop, welcome tiles on mobile):
 
----
+| Topic | Count |
+|---|---|
+| Housing & Leases | 10 |
+| Health & Safety | 7 |
+| Rent & Money | 4 |
+| Food & Essentials | 4 |
+| Getting Around | 4 |
+| Neighbours & Bylaws | 4 |
 
-## 🔄 **Development Workflow**
+Two more categories — **Academic** (5) and **Clubs & Social** (4) — exist in the data and are still matched and correctly tagged in answers, but aren't given a dedicated nav entry point; they're reachable by typing a question directly.
 
-### **Local Development**
+## Answering a question
 
-#### **Start Backend**
-```bash
-cd backend
-npm install
-npm run dev  # Uses nodemon for auto-reload
+```
+POST /chat  { message }
+     │
+     ▼
+findRelevantFAQs()  — score all 42 entries, take the top 3 as context
+     │
+     ▼
+generateWithGroq()  — Llama 3.3 70B answers, grounded in that FAQ context
+     │
+     ├─ succeeds, and a relevant FAQ was found → matchType: "faq", category from the top match
+     ├─ succeeds, but no FAQ scored above 0    → matchType: "fallback" (general knowledge, no FAQ backing)
+     └─ Groq call fails                        → searchFAQ() direct match, else getIntelligentResponse() keyword fallback
 ```
 
-#### **Start Frontend**
-```bash
-cd frontend
-npm install
-npm run dev  # Runs on http://localhost:3000
-```
+The response includes `category` and `matchType` so the frontend can render the provenance tag under each answer — a real FAQ category (e.g. `OCC · Housing & Leases`) versus a fallback match, without claiming an AI-generated answer where there wasn't one.
 
-#### **Vite Proxy Configuration**
-```javascript
-proxy: {
-  '/api': {
-    target: 'http://localhost:5000',
-    changeOrigin: true,
-    rewrite: (path) => path.replace(/^\/api/, '')
-  }
-}
-```
+## API
 
-### **Production Deployment**
+| Route | Purpose |
+|---|---|
+| `POST /chat` | Main endpoint. `{ message }` → `{ response, category, matchType, source, history }` |
+| `GET /topics` | Live topic list with per-category counts, for the sidebar |
+| `GET /history` / `DELETE /history` | In-memory chat history (resets on restart — no database) |
 
-#### **Frontend (`Chatbot.jsx`)**
-```javascript
-// Local: http://localhost:5000/chat
-// Production: https://occ-chatbot.vercel.app/chat
+There is no `/ask` route — an earlier confidence-scoring endpoint that the frontend never called was removed.
 
-const response = await axios.post('https://occ-chatbot.vercel.app/chat', {
-  message: message
-})
-```
+## Frontend
 
-#### **Git Workflow**
-```bash
-git add .
-git commit -m "Description"
-git push origin master
-# Automatic Vercel deployment
-```
+`Chatbot.jsx` is a single component with two views:
 
----
+- **Welcome** (no messages yet): a hero prompt, a grid of topic tiles, and a few real example questions.
+- **Chat**: message thread. Every bot message carries a provenance tag, and — if Groq was unreachable for that request — an inline note saying so explicitly rather than presenting a keyword-matched answer as a generated one.
 
-## 🐛 **Key Technical Challenges & Solutions**
+Layout is a persistent sidebar + chat pane on screens ≥900px, and a single-column view with a compact header below that.
 
-### **1. FAQ Data Structure Mismatch**
-**Problem**: FAQ was an array, but code expected nested object
-```javascript
-// ❌ Expected
-{ categories: { food: {...} } }
+## Environment
 
-// ✅ Actual
-[{ question: "...", answer: "..." }]
-```
+Backend needs `GROQ_API_KEY` (Groq API) in `backend/.env` locally and in the backend Vercel project's environment variables. No other AI provider is used — `openai` and `@google/generative-ai` were leftover dependencies from an earlier Gemini-based iteration and have been removed.
 
-**Solution**: Updated `searchFAQ()` and `findMostRelevantFAQ()` to handle arrays
-```javascript
-const allFAQs = Array.isArray(faqData) ? faqData : [];
-```
+## Known limitations (v1 scope, not oversights)
 
-### **2. Deployment Configuration**
-**Problem**: Vercel expected static site, got Node.js server
-**Solution**: Created `vercel.json` to specify `@vercel/node` builder
-
-### **3. CORS Issues**
-**Solution**: Added CORS middleware
-```javascript
-app.use(cors());
-```
-
-### **4. Missing Dependencies**
-**Problem**: Frontend had no `package.json`
-**Solution**: Created complete React + Vite setup
-
-### **5. Groq AI Integration Upgrade** ⭐ LATEST!
-**Problem**: Gemini was unreliable and slow, FAQ answers were static
-**Solution**: Re-architected to use Groq (Llama 3.3 70B) as PRIMARY responder with FAQ as knowledge base
-```javascript
-// NEW: Groq-first approach with FAQ context
-const relevantFAQs = findRelevantFAQs(message, 3);
-const context = relevantFAQs.map(faq => `Q: ${faq.question}\nA: ${faq.answer}`).join('\n\n');
-const answer = await generateWithGroq(message, context);
-```
-**Impact**: Faster, more reliable, and natural conversational responses while maintaining FAQ accuracy!
-
----
-
-## 📊 **Key Features**
-
-### **1. Reduced User Errors**
-- Button-based navigation (no typos)
-- Clear category hierarchy
-- Visual feedback on all interactions
-
-### **2. Comprehensive Knowledge Base**
-- 170+ questions covering student needs
-- Student-friendly language
-- Empathetic tone
-- Actionable next steps
-
-### **3. Intelligent Response Generation** ⭐ UPDATED!
-- **Primary**: Groq (Llama 3.3 70B) with FAQ context (natural, conversational, fast)
-- **Fallback 1**: Direct FAQ match (fast, accurate)
-- **Fallback 2**: Intelligent defaults (basic help)
-- Always returns a helpful response
-
-### **4. Performance Optimizations**
-- In-memory FAQ loading (fast lookups)
-- Serverless deployment (auto-scaling)
-- Minimal dependencies (faster builds)
-
----
-
-## 📈 **Usage Statistics**
-
-- **Total Questions**: 170+
-- **Categories**: 9 main topics
-- **Subcategories**: 3-7 per category
-- **Coverage**: Food, Housing, Legal, Transportation, Health, Clubs, Academic, Storage, Bylaws
-- **Response Sources**: Groq AI (Llama 3.3 70B) with FAQ context (primary), Direct FAQ (fallback), Intelligent responses (last resort)
-
----
-
-## 🎓 **Student-Specific Design Decisions**
-
-1. **Button Interface**: Prevents spelling mistakes and typos
-2. **Category Organization**: Mirrors common student concerns
-3. **Empathetic Language**: "We understand this is frustrating"
-4. **Action-Focused**: Every answer includes specific next steps
-5. **Resource Links**: Direct URLs to WUSA, food bank, etc.
-6. **Emergency Info**: Prominent safety and legal contacts
-
----
-
-## 🔮 **Future Enhancements (Potential)**
-
-- [ ] Database integration (PostgreSQL/MongoDB)
-- [ ] User authentication and conversation history
-- [ ] Analytics dashboard
-- [ ] Multi-language support
-- [ ] Voice interface
-- [ ] SMS/WhatsApp integration
-- [ ] Machine learning for better matching
-- [ ] Admin panel for FAQ management
-
----
-
-## 📝 **Code Quality**
-
-- **ESLint**: Configured for React best practices
-- **Error Handling**: Try-catch blocks throughout
-- **Logging**: Console logs for debugging
-- **Environment Variables**: Secure API key management
-- **Git**: Proper `.gitignore` for secrets
-
----
-
-## 🤝 **Credits**
-
-- **Framework**: React, Express.js
-- **AI**: Groq API (Llama 3.3 70B)
-- **Deployment**: Vercel
-- **Database**: JSON file (knowledge base)
-- **Styling**: Custom CSS
-
----
-
-**🎉 The OCC CHATBOT successfully serves University of Waterloo's off-campus student community with accessible, empathetic, and comprehensive support!**
-
+- 42 FAQ entries — not comprehensive, but everything in it is accurate and current as of the last edit.
+- Chat history is a plain in-memory array — no database, resets on every deploy or restart.
+- No auth or accounts — fully anonymous, stateless per session.

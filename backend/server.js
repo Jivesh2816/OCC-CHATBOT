@@ -85,9 +85,9 @@ function searchFAQ(userMessage) {
   // First pass: Look for exact matches
   for (const faq of allFAQs) {
     const question = faq.question.toLowerCase();
-    if (question === message) return faq.answer;
+    if (question === message) return faq;
   }
-  
+
   // Second pass: Look for exact phrase matches (more restrictive)
   for (const faq of allFAQs) {
     const question = faq.question.toLowerCase();
@@ -96,30 +96,42 @@ function searchFAQ(userMessage) {
       const messageWords = message.split(' ').filter(word => word.length > 2);
       const questionWords = question.split(' ').filter(word => word.length > 2);
       if (messageWords.length >= 2 && questionWords.length >= 2) {
-        return faq.answer;
+        return faq;
       }
     }
   }
-  
+
   // Third pass: Word-based matching with higher threshold
   for (const faq of allFAQs) {
     const question = faq.question.toLowerCase();
     const messageWords = message.split(' ').filter(word => word.length > 2);
     const questionWords = question.split(' ').filter(word => word.length > 2);
-    
+
     if (messageWords.length >= 3 && questionWords.length >= 3) {
-      const matchingWords = messageWords.filter(word => 
+      const matchingWords = messageWords.filter(word =>
         questionWords.some(qWord => qWord.includes(word) || word.includes(qWord))
       );
       // Higher threshold for longer questions to avoid false matches
       const threshold = messageWords.length >= 5 ? 0.7 : 0.6;
       if (matchingWords.length > 0 && matchingWords.length / messageWords.length >= threshold) {
-        return faq.answer;
+        return faq;
       }
     }
   }
-  
+
   return null;
+}
+
+// The 6 topics surfaced in the sidebar/welcome UI. Academic and Clubs & Social
+// FAQs still exist and are tagged, but aren't promoted as a nav entry point.
+const NAV_TOPICS = ['Housing & Leases', 'Rent & Money', 'Getting Around', 'Health & Safety', 'Food & Essentials', 'Neighbours & Bylaws'];
+
+function topicCounts() {
+  const allFAQs = Array.isArray(faqData) ? faqData : [];
+  return NAV_TOPICS.map(name => ({
+    name,
+    count: allFAQs.filter(f => f.category === name).length
+  }));
 }
 
 // Lightweight fallback for common intents
@@ -139,38 +151,6 @@ function getIntelligentResponse(message) {
   }
   if (q.includes('transport') || q.includes('bus') || q.includes('ion') || q.includes('grt')) return 'Your WatCard is your U-Pass for GRT/ION. Tap on entry. Might take 2–4 business days to activate if new.';
   return 'Happy to help! Ask me about housing, food, transportation, campus facilities, or wellness resources.';
-}
-
-function findMostRelevantFAQ(question) {
-  const message = question.toLowerCase().trim();
-  // FAQ is now a simple array of objects with question/answer properties
-  const allFAQs = Array.isArray(faqData) ? faqData : [];
-  let bestMatch = null;
-  let bestScore = 0;
-  for (const faq of allFAQs) {
-    const fq = faq.question.toLowerCase();
-    let score = 0;
-    if (fq === message) score = 1.0;
-    else if (message.includes('off-campus') && fq.includes('off-campus')) score = 0.98;
-    else if (message.includes('food') && message.includes('off-campus') && fq.includes('food') && fq.includes('off-campus')) score = 0.98;
-    else if (message.includes('residence') && fq.includes('residence')) score = 0.95;
-    else if (message.includes('food') && message.includes('residence') && fq.includes('food') && fq.includes('residence')) score = 0.95;
-    else if (message.includes('food') && fq.includes('food')) score = 0.85;
-    else if (fq.includes(message) || message.includes(fq)) {
-      const overlap = Math.min(message.length, fq.length) / Math.max(message.length, fq.length);
-      score = overlap > 0.6 ? 0.8 : 0.5;
-    } else {
-      const m = message.split(' ').filter(w => w.length > 2);
-      const qw = fq.split(' ').filter(w => w.length > 2);
-      const matches = m.filter(w => qw.some(qw2 => qw2.includes(w) || w.includes(qw2)));
-      if (matches.length > 0) {
-        const ratio = matches.length / m.length;
-        score = ratio >= 0.6 ? ratio * 0.7 : 0.3;
-      }
-    }
-    if (score > bestScore) { bestScore = score; bestMatch = faq; }
-  }
-  return { faq: bestMatch, confidence: bestScore };
 }
 
 // Function to find top N relevant FAQs for context
@@ -217,17 +197,15 @@ function findRelevantFAQs(question, topN = 3) {
   return scoredFAQs.slice(0, topN).filter(item => item.score > 0).map(item => item.faq);
 }
 
-function generateConversationalResponse(question, faqEntry) {
-  const options = [
-    `Based on the information I have: ${faqEntry.answer}`,
-    `Here’s what I can tell you: ${faqEntry.answer}`,
-    `Great question! ${faqEntry.answer}`
-  ];
-  return options[Math.floor(Math.random() * options.length)];
-}
-
 app.get('/', (req, res) => {
   res.json({ message: 'Chatbot API is running!' });
+});
+
+app.get('/topics', (req, res) => {
+  res.json({
+    topics: topicCounts(),
+    totalFAQs: Array.isArray(faqData) ? faqData.length : 0
+  });
 });
 
 app.post('/chat', async (req, res) => {
@@ -248,8 +226,8 @@ app.post('/chat', async (req, res) => {
       `Q: ${faq.question}\nA: ${faq.answer}`
     ).join('\n\n');
 
-    let botResponse, source, metadata;
-    
+    let botResponse, source, metadata, category, matchType;
+
     try {
       // Try Groq with FAQ context
       botResponse = await generateWithGroq(message, context);
@@ -259,40 +237,56 @@ app.post('/chat', async (req, res) => {
         faqCount: relevantFAQs.length
       };
       console.log('Groq generated response with FAQ context');
-      
+
       // Handle Groq error response
       if (!botResponse || botResponse.includes("Sorry, I couldn't generate")) {
         throw new Error('Groq returned empty response');
       }
+
+      // Grounded in a real FAQ only if a relevant one was actually found
+      if (relevantFAQs.length > 0) {
+        matchType = 'faq';
+        category = relevantFAQs[0].category;
+      } else {
+        matchType = 'fallback';
+        category = null;
+      }
     } catch (groqError) {
       console.error('Groq error:', groqError?.message || groqError);
-      
+
       // Fallback to direct FAQ match
-      const faqAnswer = searchFAQ(message);
-      if (faqAnswer) {
-        botResponse = faqAnswer;
+      const faqMatch = searchFAQ(message);
+      if (faqMatch) {
+        botResponse = faqMatch.answer;
         source = 'faq_fallback';
+        matchType = 'faq';
+        category = faqMatch.category;
         console.log('Used FAQ fallback');
       } else {
         botResponse = getIntelligentResponse(message);
         source = 'intelligent_response';
+        matchType = 'fallback';
+        category = null;
         console.log('Used intelligent response fallback');
       }
       metadata = { error: 'groq_failed' };
     }
 
     chatHistory.push({ role: 'bot', content: botResponse, timestamp: new Date() });
-    console.log('Sending response:', { 
-      source, 
-      preview: botResponse.substring(0, 100) + '...',
-      metadata 
-    });
-    
-    res.json({ 
-      response: botResponse, 
-      history: chatHistory.slice(-10), 
+    console.log('Sending response:', {
       source,
-      metadata 
+      category,
+      preview: botResponse.substring(0, 100) + '...',
+      metadata
+    });
+
+    res.json({
+      response: botResponse,
+      history: chatHistory.slice(-10),
+      source,
+      category,
+      matchType,
+      metadata
     });
   } catch (error) {
     console.error('Error processing chat:', error);
@@ -307,42 +301,6 @@ app.get('/history', (req, res) => {
 app.delete('/history', (req, res) => {
   chatHistory = [];
   res.json({ message: 'Chat history cleared' });
-});
-
-app.post('/ask', async (req, res) => {
-  try {
-    const { question } = req.body;
-    if (!question) return res.status(400).json({ error: 'Question is required' });
-
-    const match = findMostRelevantFAQ(question);
-    if (!match.faq) {
-      try {
-        const answer = await generateWithGroq(question);
-        return res.json({ answer, source: 'groq_general', confidence: 0 });
-      } catch (e) {
-        console.error('Groq error (/ask, no FAQ):', e?.message || e);
-        const answer = getIntelligentResponse(question);
-        return res.json({ answer, source: 'intelligent_response', confidence: 0 });
-      }
-    }
-
-    if (match.confidence >= 0.85) {
-      return res.json({ answer: match.faq.answer, source: 'faq', confidence: match.confidence });
-    } else {
-      const context = `Q: ${match.faq.question}\nA: ${match.faq.answer}`;
-      try {
-        const answer = await generateWithGroq(question, context);
-        return res.json({ answer, source: 'groq_enhanced', confidence: match.confidence });
-      } catch (e) {
-        console.error('Groq error (/ask, enhance):', e?.message || e);
-        const answer = generateConversationalResponse(question, match.faq);
-        return res.json({ answer, source: 'faq_fallback', confidence: match.confidence });
-      }
-    }
-  } catch (error) {
-    console.error('Error processing /ask request:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 app.listen(PORT, () => {
