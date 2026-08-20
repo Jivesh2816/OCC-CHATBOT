@@ -2,7 +2,7 @@
 
 Answers housing, rent, transit, health, food, and campus-bylaw questions for University of Waterloo students living off campus — grounded in a 42-entry FAQ set, not a model freeform-guessing.
 
-**Live demo:** _add your deployed frontend URL here_ · **Backend API:** [occ-chatbot.vercel.app](https://occ-chatbot.vercel.app)
+**Live demo:** https://occ-chatbot-36q6.vercel.app/ · **Backend API:** [occ-chatbot.vercel.app](https://occ-chatbot.vercel.app)
 
 ![Node](https://img.shields.io/badge/Node-Express-000?logo=node.js&logoColor=white) ![React](https://img.shields.io/badge/React_18-Vite-149eca?logo=react&logoColor=white) ![Groq](https://img.shields.io/badge/Groq-GPT--OSS_20B-orange) ![Vercel](https://img.shields.io/badge/Deploy-Vercel-black?logo=vercel&logoColor=white)
 
