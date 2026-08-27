@@ -2,6 +2,15 @@
 node_modules/
 */node_modules/
 
+# SQLite data (Stage 5 persistence) — local chat/ticket content, not for git
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Eval run output (Stage 6) — regenerated each run, not source
+backend/eval/eval-results.json
+
 # Environment variables
 .env
 .env.local
