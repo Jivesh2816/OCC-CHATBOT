@@ -54,7 +54,7 @@ function FindingCard({ finding }) {
   )
 }
 
-export default function LeaseChecker({ sessionId, onSessionId, onTicketCreated }) {
+export default function LeaseChecker({ sessionId, onSessionId, onTicketCreated, staffHandoff = false }) {
   const [text, setText] = useState('')
   const [file, setFile] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -115,6 +115,9 @@ export default function LeaseChecker({ sessionId, onSessionId, onTicketCreated }
         </h2>
         <p className="text-[13.5px] leading-relaxed text-muted-foreground">
           Paste your lease or upload the PDF. Each clause is checked against official Ontario and UW Off-Campus Housing guidance on terms a lease can&rsquo;t enforce — every flag links to the page it&rsquo;s based on.
+        </p>
+        <p className="text-[11.5px] leading-relaxed text-muted-foreground/80">
+          The text is checked by rules and by an AI model (sent to Groq); it isn&rsquo;t saved unless you send the flagged clauses to staff. You can remove names and addresses first.
         </p>
       </div>
 
@@ -182,10 +185,15 @@ export default function LeaseChecker({ sessionId, onSessionId, onTicketCreated }
           )}
           {result.findings.map(f => <FindingCard key={`${f.ruleId}-${f.clauseNumber}`} finding={f} />)}
 
-          {result.findings.length > 0 && (
+          {result.findings.length > 0 && !staffHandoff && (
+            <p className="rounded-2xl border border-dashed border-border px-4 py-3 text-[12.5px] leading-relaxed text-muted-foreground">
+              Want a person to look at this? Take these results to UW Off-Campus Housing or Waterloo Region Community Legal Services.
+            </p>
+          )}
+          {result.findings.length > 0 && staffHandoff && (
             <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-dashed border-border px-4 py-3">
               <p className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-muted-foreground">
-                Want a person to look at this? It opens a ticket with the flagged clauses for the Off-Campus team.
+                Want a person to look at this? It sends the flagged clauses (not the whole lease) to staff as a ticket.
               </p>
               {ticket ? (
                 <Badge variant="primary"><Check className="h-3 w-3" /> Sent · {ticket}</Badge>

@@ -116,6 +116,18 @@ function TicketDetail({ api, ticketId, onChanged, onBack }) {
         ))}
       </div>
 
+      {ticket.emails?.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <h3 className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">Follow-up drafts (not sent — review and send yourself if useful)</h3>
+          {ticket.emails.map((email, i) => (
+            <div key={i} className="rounded-xl border border-border bg-card/60 px-3 py-2 text-[12.5px] leading-relaxed">
+              <div className="font-medium">{email.office || email.to} · {email.subject}</div>
+              <div className="mt-1 whitespace-pre-line text-muted-foreground">{email.body}</div>
+            </div>
+          ))}
+        </section>
+      )}
+
       <section className="flex flex-col gap-2">
         <h3 className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">Student conversation</h3>
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card/60 p-3">
