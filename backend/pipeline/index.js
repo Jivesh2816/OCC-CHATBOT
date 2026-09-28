@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { db } = require('../db');
 const critic = require('../lib/critic');
 const { alertChannels } = require('../lib/alerts');
+const { urgentReply } = require('../lib/crisis');
 const { getIntelligentResponse } = require('../lib/knowledge');
 const { now, recentMessages, createTicketRecord, escalateTicketRecord } = require('../lib/tickets');
 const { HISTORY_TURNS } = require('./memory');
@@ -9,42 +10,35 @@ const { classifyIntent } = require('./router');
 const { generateAnswer, retrievalAgent } = require('./retrieval');
 const { ACTION_AGENT_INTENTS, actionAgent } = require('./action');
 
-const URGENT_RESOURCES = `⚠️ This sounds like it may need more urgent, real-world help than a chatbot can give.
-
-Please reach out directly:
-• **Emergency**: 911
-• **Campus Police**: 519-888-4911
-• **Waterloo Regional Police (non-emergency)**: 519-570-9777
-• **Good2Talk (student mental health line)**: 1-866-925-5454`;
-
 // Only promise a person when staff actually get notified — a queue nobody is
 // alerted to isn't a handoff, and a student in crisis shouldn't be told one is
 // coming when it may not be.
-const URGENT_ESCALATION_MESSAGE = alertChannels().length
-  ? `${URGENT_RESOURCES}\n\nThis conversation has also been sent to the Off-Campus support team, and any reply will show up right here — but please don't wait on that if you're in danger. Use the numbers above.`
-  : `${URGENT_RESOURCES}\n\nPlease use the numbers above — they're staffed by people who can help right now.`;
+const staffHandoff = () => alertChannels().length > 0;
 
 // ---------------------------------------------------------------------------
 // Stage 4: Critic side effects. The rules live in lib/critic.js (pure); this
 // carries out what they decide and logs every decision, fired or not.
 // ---------------------------------------------------------------------------
 
-async function applyCritic({ message, intent, routerConfidence, matchType, botResponse, actionsTaken, preCheckOverride, citations, sessionId }) {
-  const decision = critic.postCheck({ intent, routerConfidence, matchType, botResponse, actionsTaken, preCheckOverride, citations });
+async function applyCritic({ message, intent, routerConfidence, matchType, botResponse, actionsTaken, preCheckOverride, citations, crisis, sessionId }) {
+  const decision = critic.postCheck({ intent, routerConfidence, matchType, botResponse, actionsTaken, preCheckOverride, citations, crisis });
   const actions = [...actionsTaken];
 
   for (const ticketId of decision.escalate) {
     const reason = 'Critic override: high/urgent priority ticket was not escalated by the action agent.';
-    const result = await escalateTicketRecord({ ticketId, reason });
+    const result = await escalateTicketRecord({ ticketId, reason }, sessionId);
     actions.push({ tool: 'escalate_ticket', args: { ticketId, reason }, result, forcedByCritic: true });
   }
 
-  if (decision.createUrgent) {
-    const args = { category: 'crisis', summary: 'Urgent/safety message — opened by the critic because no ticket existed.', priority: 'urgent' };
+  if (decision.ensureTicket) {
+    // Reuses the session's open ticket when there is one (createTicketRecord
+    // dedupes), so a student repeating themselves raises one alert, not three.
+    const label = crisis?.label || 'urgent message';
+    const args = { category: crisis?.id || 'crisis', summary: `${label[0].toUpperCase()}${label.slice(1)} — opened by the critic because the action agent opened no ticket.`, priority: decision.ensureTicket.priority };
     const created = await createTicketRecord(args, message, intent, sessionId);
     actions.push({ tool: 'create_ticket', args, result: created, forcedByCritic: true });
-    const reason = 'Critic override: urgent message must reach a human.';
-    const escalated = await escalateTicketRecord({ ticketId: created.ticketId, reason });
+    const reason = `Critic override: ${label} must reach a person.`;
+    const escalated = await escalateTicketRecord({ ticketId: created.ticketId, reason }, sessionId);
     actions.push({ tool: 'escalate_ticket', args: { ticketId: created.ticketId, reason }, result: escalated, forcedByCritic: true });
   }
 
@@ -84,7 +78,9 @@ async function runPipeline({ message, sessionId: incomingSessionId, emit = () =>
     return result;
   };
 
-  console.log('Processing question:', message, 'session:', sessionId, 'memory turns:', history.length);
+  // Message text stays out of the logs: they're kept by the host on a
+  // different schedule from the database, and messages can hold crisis details.
+  console.log('Processing message:', { chars: message.length, memoryTurns: history.length });
 
   // Stage 1: route before any retrieval. Null means the router itself
   // failed (Groq error/bad JSON) — treat that like the old ungated flow.
@@ -99,10 +95,12 @@ async function runPipeline({ message, sessionId: incomingSessionId, emit = () =>
   // Stage 4a: critic pre-check — a deterministic backstop independent of
   // the router's LLM judgment. If it fires, it wins.
   const pre = await stage('critic_pre', async () => critic.preCheck(message, routerResult?.intent || null), r => ({
-    override: r.override
+    override: r.override,
+    crisis: r.crisis?.id || null
   }));
   const intent = pre.intent;
   const preCheckOverride = pre.override;
+  const crisis = pre.crisis;
 
   let botResponse, source, metadata, category, matchType, citations = [];
   const onToken = text => emit({ type: 'token', text });
@@ -110,7 +108,7 @@ async function runPipeline({ message, sessionId: incomingSessionId, emit = () =>
   if (intent === 'urgent') {
     // Urgent-flag intents skip retrieval and generation entirely.
     await stage('retrieval', async () => null, () => ({ skipped: 'urgent — fixed crisis-resources reply' }));
-    botResponse = URGENT_ESCALATION_MESSAGE;
+    botResponse = urgentReply(crisis?.id, { staffHandoff: staffHandoff() });
     onToken(botResponse);
     source = 'router_escalation';
     matchType = 'escalation';
@@ -167,7 +165,7 @@ async function runPipeline({ message, sessionId: incomingSessionId, emit = () =>
 
   // Stage 4b: critic review — runs before anything is sent, can annotate the
   // response and force an escalation the action agent didn't make.
-  const reviewed = await stage('critic', () => applyCritic({ message, intent, routerConfidence, matchType, botResponse, actionsTaken: actions, preCheckOverride, citations, sessionId }), r => ({
+  const reviewed = await stage('critic', () => applyCritic({ message, intent, routerConfidence, matchType, botResponse, actionsTaken: actions, preCheckOverride, citations, crisis, sessionId }), r => ({
     flags: r.flags,
     reasoning: r.reasoning,
     forced: r.actionsTaken.filter(a => a.forcedByCritic).map(a => a.tool)
@@ -178,7 +176,9 @@ async function runPipeline({ message, sessionId: incomingSessionId, emit = () =>
   await db.run('INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)', [sessionId, 'bot', botResponse, now()]);
   const recent = await recentMessages(sessionId, 10);
 
-  console.log('Sending response:', { source, category, preview: botResponse.substring(0, 100) + '...', criticFlags: reviewed.flags });
+  const escalated = actions.some(a => a.tool === 'escalate_ticket' && a.result?.escalated);
+  const staffAlerted = actions.some(a => a.tool === 'escalate_ticket' && a.result?.staffAlerted);
+  console.log('Sending response:', { source, intent, matchType, escalated, criticFlags: reviewed.flags });
 
   return {
     response: botResponse,
@@ -186,6 +186,11 @@ async function runPipeline({ message, sessionId: incomingSessionId, emit = () =>
     history: recent,
     actions,
     criticFlags: reviewed.flags,
+    // Whether a person was actually brought in, for the UI's wording.
+    escalated,
+    staffAlerted,
+    staffHandoff: staffHandoff(),
+    crisis: crisis?.id || null,
     source,
     category,
     matchType,

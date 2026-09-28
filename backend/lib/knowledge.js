@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { createIndex } = require('./bm25');
+const { SAFETY_FOOTER } = require('./crisis');
 
 // Load FAQ data
 let faqData = {};
@@ -49,51 +50,31 @@ function expandQuery(query) {
   return extra.length ? `${query} ${extra.join(' ')}` : query;
 }
 
-// Function to search FAQ for matching questions
-function searchFAQ(userMessage) {
-  const message = userMessage.toLowerCase().trim();
+// FAQ retrieval: BM25 over each entry's question (counted twice, since it's
+// the best summary of the entry) plus its answer. Scores below the threshold
+// are treated as no match. The old word-overlap scorer counted any shared
+// three-letter word ("the", "and") as a hit, so almost every question — even
+// "asdf the and for" — came back "grounded in an FAQ".
+//
+// Thresholds were set against eval-set.json and a list of off-topic
+// questions: genuine matches score ~5–19, unrelated questions under ~4.
+const FAQ_MIN_SCORE = 5;
+// Serving an FAQ answer verbatim (model unavailable) needs a clearer match.
+const FAQ_VERBATIM_MIN_SCORE = 8;
+const allFAQs = () => (Array.isArray(faqData) ? faqData : []);
+const faqIndex = createIndex(allFAQs(), f => `${f.question} ${f.question} ${f.answer}`);
 
-  // FAQ is now a simple array of objects with question/answer properties
-  const allFAQs = Array.isArray(faqData) ? faqData : [];
+function scoredFAQs(question, { topN = 3, category = null, minScore = FAQ_MIN_SCORE } = {}) {
+  return faqIndex.search(expandQuery(question), {
+    topN,
+    minScore,
+    filter: category ? f => f.category === category : null
+  });
+}
 
-  // First pass: Look for exact matches
-  for (const faq of allFAQs) {
-    const question = faq.question.toLowerCase();
-    if (question === message) return faq;
-  }
-
-  // Second pass: Look for exact phrase matches (more restrictive)
-  for (const faq of allFAQs) {
-    const question = faq.question.toLowerCase();
-    if (question.includes(message) || message.includes(question)) {
-      // Additional check: ensure it's a meaningful match (not just single words)
-      const messageWords = message.split(' ').filter(word => word.length > 2);
-      const questionWords = question.split(' ').filter(word => word.length > 2);
-      if (messageWords.length >= 2 && questionWords.length >= 2) {
-        return faq;
-      }
-    }
-  }
-
-  // Third pass: Word-based matching with higher threshold
-  for (const faq of allFAQs) {
-    const question = faq.question.toLowerCase();
-    const messageWords = message.split(' ').filter(word => word.length > 2);
-    const questionWords = question.split(' ').filter(word => word.length > 2);
-
-    if (messageWords.length >= 3 && questionWords.length >= 3) {
-      const matchingWords = messageWords.filter(word =>
-        questionWords.some(qWord => qWord.includes(word) || word.includes(qWord))
-      );
-      // Higher threshold for longer questions to avoid false matches
-      const threshold = messageWords.length >= 5 ? 0.7 : 0.6;
-      if (matchingWords.length > 0 && matchingWords.length / messageWords.length >= threshold) {
-        return faq;
-      }
-    }
-  }
-
-  return null;
+// Best single FAQ to show as-is when the model is unavailable, or null.
+function searchFAQ(userMessage, category = null) {
+  return scoredFAQs(userMessage, { topN: 1, category, minScore: FAQ_VERBATIM_MIN_SCORE })[0]?.doc || null;
 }
 
 // The 6 topics surfaced in the sidebar/welcome UI. Academic and Clubs & Social
@@ -101,77 +82,33 @@ function searchFAQ(userMessage) {
 const NAV_TOPICS = ['Housing & Leases', 'Rent & Money', 'Getting Around', 'Health & Safety', 'Food & Essentials', 'Neighbours & Bylaws'];
 
 function topicCounts() {
-  const allFAQs = Array.isArray(faqData) ? faqData : [];
   return NAV_TOPICS.map(name => ({
     name,
-    count: allFAQs.filter(f => f.category === name).length
+    count: allFAQs().filter(f => f.category === name).length
   }));
 }
 
-// Lightweight fallback for common intents
+// Last-resort reply when the model is unavailable and no FAQ matched. It says
+// plainly that no answer was generated, points somewhere real, and always
+// carries crisis numbers — this is what a struggling student sees during an
+// outage, so it must never read as a cheerful non-answer.
 function getIntelligentResponse(message) {
-  const q = message.toLowerCase();
-  if (q.includes('study') || q.includes('library')) return 'Try Davis Centre Library, Dana Porter Library, and SLC study areas.';
-  if (q.includes('event')) return 'See WUSA Events and the UWaterloo events calendar for what\'s on this week.';
-  if (q.includes('housing') || q.includes('rent')) return 'Check the Off-Campus Housing Office site for listings, leases, and tenant rights.';
-  if (q.includes('food') || q.includes('meal') || q.includes('eat')) {
-    return '🍕 Campus is full of food options! Check out:\n\n• **SLC**: Tim Hortons, Pizza Pizza, Subway, Booster Juice\n• **DC & MC**: Tim Hortons locations\n• **South Campus Hall**: Food court with diverse options\n• **Dining Halls**: Village 1, REV for all-you-can-eat\n• **WUSA Food Support**: Free hampers at SLC Turnkey\n\nUse your WatCard everywhere! Perfect for off-campus students.';
-  }
-  if (q.includes('tim') || q.includes('tim hortons') || q.includes('coffee')) {
-    return '☕ Tim Hortons locations on campus:\n\n• **SLC** - Busiest, open late\n• **DC** (Davis Centre) - Between classes\n• **MC** (Math & Computer) - Quick runs\n• **South Campus Hall** - Near food court\n\nAll accept WatCard! Great for coffee, breakfast, and study snacks.';
-  }
-  if (q.includes('slc') && (q.includes('food') || q.includes('eat'))) {
-    return '🎉 SLC Food Court has everything:\n\n• Tim Hortons - Coffee & breakfast\n• Pizza Pizza - Slices & whole pizzas\n• Subway - Subs & salads\n• Booster Juice - Smoothies\n• Teriyaki Experience - Asian bowls\n\nOpen late, WatCard accepted everywhere!';
-  }
-  if (q.includes('transport') || q.includes('bus') || q.includes('ion') || q.includes('grt')) return 'Your WatCard is your U-Pass for GRT/ION. Tap on entry. Might take 2–4 business days to activate if new.';
-  return 'Happy to help! Ask me about housing, food, transportation, campus facilities, or wellness resources.';
+  const q = String(message || '').toLowerCase();
+  let pointer = 'For housing and off-campus questions, the UW Off-Campus Housing website (uwaterloo.ca/off-campus-housing) is the best place to start.';
+  if (/(lease|landlord|rent|tenant|evict|deposit|sublet)/.test(q)) pointer = 'For leases and tenant rights, see uwaterloo.ca/off-campus-housing or ontario.ca/page/renting-ontario-your-rights.';
+  else if (/(food|meal|eat|grocer|hungry)/.test(q)) pointer = 'For food support, WUSA runs food programs for students — see wusa.ca.';
+  else if (/(bus|ion|grt|transit|u-?pass)/.test(q)) pointer = 'For transit, see grt.ca; your WatCard works as your U-Pass.';
+  else if (/(health|doctor|clinic|counsel|mental|anxious|depress|stress)/.test(q)) pointer = 'For health and counselling, see UW Campus Wellness (uwaterloo.ca/campus-wellness), or Good2Talk at 1-866-925-5454 (24/7).';
+  return `I can't generate an answer right now — the AI model is temporarily unavailable. Please try again in a few minutes.
+
+${pointer}${SAFETY_FOOTER}`;
 }
 
 // Function to find top N relevant FAQs for context.
-// When category is given (from the router's intent), scoring is restricted
-// to that category instead of running over all 42 entries.
+// When category is given (from the router's intent), matching is restricted
+// to that category instead of running over all entries.
 function findRelevantFAQs(question, topN = 3, category = null) {
-  const message = question.toLowerCase().trim();
-  const allFAQs = (Array.isArray(faqData) ? faqData : [])
-    .filter(faq => !category || faq.category === category);
-
-  // Score all FAQs
-  const scoredFAQs = allFAQs.map(faq => {
-    const fq = faq.question.toLowerCase();
-    let score = 0;
-
-    // Exact match
-    if (fq === message) score = 100;
-    // Off-campus specific
-    else if (message.includes('off-campus') && fq.includes('off-campus')) score = 95;
-    else if (message.includes('food') && message.includes('off-campus') && fq.includes('food') && fq.includes('off-campus')) score = 95;
-    // Residence specific
-    else if (message.includes('residence') && fq.includes('residence')) score = 90;
-    else if (message.includes('food') && message.includes('residence') && fq.includes('food') && fq.includes('residence')) score = 90;
-    // Food specific
-    else if (message.includes('food') && fq.includes('food')) score = 80;
-    // Partial match
-    else if (fq.includes(message) || message.includes(fq)) {
-      const overlap = Math.min(message.length, fq.length) / Math.max(message.length, fq.length);
-      score = overlap > 0.6 ? 70 : 40;
-    }
-    // Word-based matching
-    else {
-      const m = message.split(' ').filter(w => w.length > 2);
-      const qw = fq.split(' ').filter(w => w.length > 2);
-      const matches = m.filter(w => qw.some(qw2 => qw2.includes(w) || w.includes(qw2)));
-      if (matches.length > 0) {
-        const ratio = matches.length / Math.max(m.length, qw.length);
-        score = ratio >= 0.5 ? 60 : 30;
-      }
-    }
-
-    return { faq, score };
-  });
-
-  // Sort by score descending and return top N
-  scoredFAQs.sort((a, b) => b.score - a.score);
-  return scoredFAQs.slice(0, topN).filter(item => item.score > 0).map(item => item.faq);
+  return scoredFAQs(question, { topN, category }).map(r => r.doc);
 }
 
 // Official passages relevant to the question, ranked by BM25.
