@@ -1,20 +1,18 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import axios from 'axios'
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import gsap from 'gsap'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Plus, SendHorizontal, Sparkles, ListChecks, ArrowUpRight, Ticket, Home, Wallet, TrainFront, HeartPulse, ShoppingBasket, Users2 } from 'lucide-react'
+import { Plus, SendHorizontal, Sparkles, ListChecks, ArrowUpRight, Ticket, Home, Wallet, TrainFront, HeartPulse, ShoppingBasket, Users2, MessagesSquare, FileSearch, ScanSearch, UserRound, ExternalLink, BookOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetTrigger, SheetContent } from '@/components/ui/sheet'
 import VantaGlobe from '@/components/VantaGlobe'
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  (typeof window !== 'undefined' && window.location.hostname === 'localhost'
-    ? '/api'
-    : 'https://occ-chatbot.vercel.app')
+import AgentTrace, { stepsFromTrace } from '@/components/AgentTrace'
+import LeaseChecker from '@/components/LeaseChecker'
+import ScamChecker from '@/components/ScamChecker'
+import { api, streamChat, normalizeCitations } from '@/lib/api'
+import { cn } from '@/lib/utils'
 
 // The 6 topics promoted as example prompts on the empty screen. Counts are
 // fetched live from /topics and fall back to these known-good numbers.
@@ -29,16 +27,23 @@ const NAV_TOPICS = [
 
 const POPULAR_QUESTIONS = [
   "My landlord won't fix maintenance issues",
-  'U-Pass not working on bus/ION',
-  'What grocery stores offer student discounts?',
+  'Can my landlord enter without notice?',
+  'How much can my rent go up this year?',
   'Mental health resources'
 ]
 
-const TOTAL_FAQS_FALLBACK = 42
+const MODES = [
+  { key: 'chat', label: 'Chat', icon: MessagesSquare },
+  { key: 'lease', label: 'Lease check', icon: FileSearch },
+  { key: 'listing', label: 'Scam check', icon: ScanSearch }
+]
 
-// Stage 5: the backend now persists messages/tickets per session in SQLite.
-// sessionStorage (not localStorage) keeps that identity scoped to this tab,
-// matching the app's no-auth, anonymous-per-session model.
+const TOTAL_FAQS_FALLBACK = 42
+const STAFF_POLL_MS = 8000
+
+// The backend persists messages/tickets per session. sessionStorage (not
+// localStorage) keeps that identity scoped to this tab, matching the app's
+// no-auth, anonymous-per-session model.
 const SESSION_STORAGE_KEY = 'occ_session_id'
 
 const dot = (hue) => `oklch(0.62 0.15 ${hue})`
@@ -51,32 +56,49 @@ function formatTime(date) {
 // The model occasionally emits literal "<br>" text instead of a markdown
 // line break — react-markdown renders raw HTML as inert text by default, so
 // swap it for a real newline before handing content to ReactMarkdown.
-function cleanMarkdown(content) {
-  return content.replace(/<br\s*\/?>/gi, '\n')
+// Inline "[2]" citations become links to the passage's official page.
+function prepareMarkdown(content, citations = []) {
+  const byNumber = Object.fromEntries(citations.map(c => [c.n, c]))
+  return normalizeCitations(content)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/\[(\d+)\](?!\()/g, (match, n) => (byNumber[n] ? `[[${n}]](${byNumber[n].url})` : match))
 }
 
-// One line summarizing what the agent pipeline actually did for this message
-// — the router's classification, any critic flags that fired, and any real
-// action-agent side effects (ticket/escalation/email). Without this, the
-// whole backend rebuild is invisible in the UI.
-function traceSummary(m) {
-  const parts = [`intent: ${m.intent || 'none'}${m.routerConfidence != null ? ` (${Math.round(m.routerConfidence * 100)}%)` : ''}`]
-  const firedFlags = Object.entries(m.criticFlags || {}).filter(([, fired]) => fired).map(([name]) => name)
-  if (firedFlags.length) parts.push(`critic: ${firedFlags.join(', ')}`)
-  if (m.actions?.length) parts.push(`actions: ${m.actions.map(a => a.tool.replace(/_/g, ' ')).join(', ')}`)
-  return parts.join('   ·   ')
+const markdownComponents = {
+  a: ({ node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />
 }
 
-function ActivityPanel({ tickets, totalFAQs }) {
+function Citations({ citations }) {
+  if (!citations?.length) return null
+  const cited = citations.filter(c => c.cited)
+  const shown = cited.length ? cited : citations
+  return (
+    <div className="mt-2 flex flex-col gap-1 rounded-xl border border-border/70 bg-panel/70 px-3 py-2">
+      <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
+        <BookOpen className="h-3 w-3" /> {cited.length ? 'Sources' : 'Related official pages'}
+      </div>
+      {shown.map(c => (
+        <a key={c.id} href={c.url} target="_blank" rel="noreferrer" className="group flex items-baseline gap-2 text-[12px] leading-snug">
+          {cited.length > 0 && <span className="font-mono text-[10.5px] text-primary">[{c.n}]</span>}
+          <span className="text-foreground/80 group-hover:text-primary group-hover:underline">{c.title}</span>
+          <span className="shrink-0 text-muted-foreground/70">· {c.publisher}</span>
+          <ExternalLink className="h-3 w-3 shrink-0 self-center text-muted-foreground/60" />
+        </a>
+      ))}
+    </div>
+  )
+}
+
+function ActivityPanel({ tickets, totalFAQs, totalSources }) {
   return (
     <div className="flex h-full flex-col gap-5 p-5">
       <div className="flex items-center gap-2 text-[15px] font-semibold">
         <ListChecks className="h-4 w-4 text-primary" />
-        Agent Activity
+        Your tickets
       </div>
       {tickets.length === 0 && (
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          No tickets yet — a housing or safety issue that needs real follow-up creates one here.
+          No tickets yet — a housing or safety issue that needs real follow-up creates one here, and a staff reply shows up right in your chat.
         </p>
       )}
       {tickets.length > 0 && (
@@ -88,36 +110,49 @@ function ActivityPanel({ tickets, totalFAQs }) {
                   <Ticket className="h-3 w-3 text-muted-foreground" />
                   {t.id}
                 </span>
-                <Badge variant={t.escalated ? 'destructive' : 'default'}>
-                  {t.escalated ? 'Escalated' : t.status}
+                <Badge variant={t.status === 'resolved' ? 'default' : t.escalated ? 'destructive' : 'primary'}>
+                  {t.status === 'in_progress' ? 'In progress' : t.status === 'resolved' ? 'Resolved' : t.escalated ? 'Escalated' : t.status}
                 </Badge>
               </div>
-              <span className="text-[11.5px] text-muted-foreground">{t.category} · {t.priority}</span>
+              <span className="text-[11.5px] text-muted-foreground">
+                {t.category} · {t.priority}{t.replies?.length ? ` · ${t.replies.length} staff repl${t.replies.length === 1 ? 'y' : 'ies'}` : ''}
+              </span>
             </div>
           ))}
         </div>
       )}
       <div className="mt-auto flex flex-col gap-2 border-t border-border pt-4 text-[12px] leading-relaxed text-muted-foreground">
-        <p>Can&rsquo;t find it here? WUSA and the UW Off-Campus Housing Office have the full details — this assistant only draws from a {totalFAQs}-entry FAQ set.</p>
+        <p>Answers draw from a {totalFAQs}-entry FAQ set and {totalSources} passages from official UW and Ontario pages. For anything binding, check with WUSA or the UW Off-Campus Housing Office.</p>
         <a href="https://wusa.ca" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-primary hover:underline">
           wusa.ca <ArrowUpRight className="h-3 w-3" />
         </a>
+        <a href="#/staff" className="text-[11px] text-muted-foreground/70 hover:text-foreground">Staff sign-in</a>
       </div>
     </div>
   )
 }
 
+function BotAvatar() {
+  return (
+    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white shadow-glow" style={{ background: 'var(--gradient-brand)' }}>
+      <Sparkles className="h-3.5 w-3.5" />
+    </span>
+  )
+}
+
 const Chatbot = () => {
   const [messages, setMessages] = useState([])
-  const [sessionId, setSessionId] = useState(() => {
+  const [sessionId, setSessionIdState] = useState(() => {
     try { return sessionStorage.getItem(SESSION_STORAGE_KEY) || null } catch { return null }
   })
   const [isLoading, setIsLoading] = useState(false)
   const [textInput, setTextInput] = useState('')
-  const [topics, setTopics] = useState(NAV_TOPICS.map(t => ({ name: t.name, count: t.fallbackCount })))
+  const [mode, setMode] = useState('chat')
   const [totalFAQs, setTotalFAQs] = useState(TOTAL_FAQS_FALLBACK)
+  const [totalSources, setTotalSources] = useState(null)
   const [tickets, setTickets] = useState([])
   const [activityOpen, setActivityOpen] = useState(false)
+  const lastMessageId = useRef(0)
   const bodyEndRef = useRef(null)
   const lastBotRowRef = useRef(null)
   const inputRef = useRef(null)
@@ -127,39 +162,82 @@ const Chatbot = () => {
 
   const isWelcome = messages.length === 0
 
+  const setSessionId = useCallback(id => {
+    setSessionIdState(id)
+    try {
+      if (id) sessionStorage.setItem(SESSION_STORAGE_KEY, id)
+      else sessionStorage.removeItem(SESSION_STORAGE_KEY)
+    } catch { /* best-effort */ }
+  }, [])
+
   useEffect(() => {
     let cancelled = false
-    axios.get(`${API_BASE_URL}/topics`).then(res => {
-      if (cancelled || !res.data) return
-      if (Array.isArray(res.data.topics)) setTopics(res.data.topics)
-      if (res.data.totalFAQs) setTotalFAQs(res.data.totalFAQs)
+    api.topics().then(data => {
+      if (cancelled || !data) return
+      if (data.totalFAQs) setTotalFAQs(data.totalFAQs)
+      if (data.totalSources) setTotalSources(data.totalSources)
     }).catch(() => {
       // keep fallback counts — the UI still works, just not live
     })
     return () => { cancelled = true }
   }, [])
 
-  // Real side effects from the action agent (Stage 3) otherwise only exist
-  // in SQLite — this is what makes them visible without opening devtools.
-  const refreshTickets = () => {
-    axios.get(`${API_BASE_URL}/tickets`).then(res => {
-      if (Array.isArray(res.data?.tickets)) setTickets(res.data.tickets)
-    }).catch(() => { /* Activity panel just stays empty */ })
+  const noteMessageIds = rows => {
+    for (const row of rows) if (row.id > lastMessageId.current) lastMessageId.current = row.id
   }
 
-  useEffect(() => { refreshTickets() }, [])
+  // A refresh keeps the conversation: the session id survives in
+  // sessionStorage and its messages are stored server-side.
+  useEffect(() => {
+    if (!sessionId) return
+    let cancelled = false
+    api.history(sessionId).then(rows => {
+      if (cancelled || rows.length === 0) return
+      noteMessageIds(rows)
+      setMessages(prev => (prev.length ? prev : rows.map(r => ({ role: r.role, content: r.content, timestamp: r.timestamp, restored: true }))))
+    }).catch(() => { /* start fresh */ })
+    return () => { cancelled = true }
+    // only on first mount — later session changes come from sending messages
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const refreshTickets = useCallback(() => {
+    if (!sessionId) return setTickets([])
+    api.sessionTickets(sessionId).then(setTickets).catch(() => { /* panel just stays as-is */ })
+  }, [sessionId])
+
+  useEffect(() => { refreshTickets() }, [refreshTickets])
+
+  // Human-in-the-loop: once this session has a ticket, poll for staff
+  // replies and drop them into the conversation as they arrive.
+  useEffect(() => {
+    if (!sessionId || tickets.length === 0) return
+    const poll = () => {
+      api.sessionUpdates(sessionId, lastMessageId.current).then(updates => {
+        if (!updates.length) return
+        noteMessageIds(updates)
+        setMessages(prev => [...prev, ...updates.map(u => ({ role: 'staff', content: u.content, timestamp: u.timestamp }))])
+        refreshTickets()
+      }).catch(() => { /* try again next tick */ })
+    }
+    const id = setInterval(poll, STAFF_POLL_MS)
+    return () => clearInterval(id)
+  }, [sessionId, tickets.length, refreshTickets])
 
   useEffect(() => {
     const last = messages[messages.length - 1]
     // A finished bot answer scrolls its own top (tag + start of the reply) into
     // view instead of jumping straight to the bottom, so it isn't hidden above
     // the fold on short viewports. Everything else chases the bottom.
-    if (!isLoading && last?.role === 'bot' && lastBotRowRef.current) {
+    if (!isLoading && last?.role === 'bot' && !last.restored && lastBotRowRef.current) {
       lastBotRowRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
     } else {
       bodyEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
-  }, [messages, isLoading])
+    // Deliberately not on every streamed token — the reader stays at the top
+    // of the answer while it streams instead of being dragged down.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length, isLoading])
 
   // Animate each newly-appended row in with GSAP instead of a static CSS
   // keyframe — lets bot rows and user rows ease in slightly differently.
@@ -180,7 +258,7 @@ const Chatbot = () => {
   // Stagger the greeting + topic cards + popular chips in on first mount /
   // whenever we return to the empty screen after "New chat".
   useLayoutEffect(() => {
-    if (!isWelcome || !welcomeRef.current) return
+    if (mode !== 'chat' || !isWelcome || !welcomeRef.current) return
     const ctx = gsap.context(() => {
       gsap.fromTo('.js-hero', { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' })
       gsap.fromTo(
@@ -195,50 +273,74 @@ const Chatbot = () => {
       )
     }, welcomeRef)
     return () => ctx.revert()
-  }, [isWelcome])
+  }, [isWelcome, mode])
+
+  const updateLastBot = updater => setMessages(prev => {
+    const next = [...prev]
+    const i = next.length - 1
+    if (i >= 0 && next[i].role === 'bot' && next[i].streaming) next[i] = updater(next[i])
+    return next
+  })
 
   const sendMessage = async (text) => {
     const trimmed = text.trim()
-    if (!trimmed) return
+    if (!trimmed || isLoading) return
     setTextInput('')
+    setMode('chat')
 
-    const userMessage = { role: 'user', content: trimmed, timestamp: new Date() }
-    setMessages(prev => [...prev, userMessage])
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: trimmed, timestamp: new Date() },
+      { role: 'bot', content: '', timestamp: new Date(), streaming: true, steps: {} }
+    ])
     setIsLoading(true)
 
     try {
-      const res = await axios.post(`${API_BASE_URL}/chat`, { message: trimmed, sessionId })
-      const { response, category, matchType, source, metadata, sessionId: returnedSessionId, intent, routerConfidence, criticFlags, actions } = res.data
-      if (returnedSessionId && returnedSessionId !== sessionId) {
-        setSessionId(returnedSessionId)
-        try { sessionStorage.setItem(SESSION_STORAGE_KEY, returnedSessionId) } catch { /* best-effort */ }
-      }
-      setMessages(prev => [...prev, {
-        role: 'bot',
-        content: response,
-        timestamp: new Date(),
-        category,
-        matchType,
-        groqDown: metadata?.error === 'groq_failed',
-        source,
-        intent,
-        routerConfidence,
-        criticFlags,
-        actions
-      }])
-      if (actions?.length) refreshTickets()
-    } catch (err) {
-      setMessages(prev => [...prev, {
-        role: 'bot',
+      await streamChat({ message: trimmed, sessionId }, event => {
+        if (event.type === 'session') {
+          if (event.sessionId !== sessionId) setSessionId(event.sessionId)
+          updateLastBot(m => ({ ...m, memoryTurns: event.memoryTurns }))
+        } else if (event.type === 'step') {
+          updateLastBot(m => ({ ...m, steps: { ...m.steps, [event.stage]: event } }))
+        } else if (event.type === 'token') {
+          updateLastBot(m => ({ ...m, content: m.content + event.text }))
+        } else if (event.type === 'done') {
+          const p = event.payload
+          if (p.sessionId && p.sessionId !== sessionId) setSessionId(p.sessionId)
+          noteMessageIds(p.history || [])
+          updateLastBot(m => ({
+            ...m,
+            streaming: false,
+            content: p.response,
+            timestamp: new Date(),
+            category: p.category,
+            matchType: p.matchType,
+            groqDown: p.metadata?.error === 'groq_failed',
+            intent: p.intent,
+            citations: p.citations || [],
+            steps: p.trace ? stepsFromTrace(p.trace) : m.steps,
+            memoryTurns: p.memoryTurns ?? m.memoryTurns,
+            actions: p.actions
+          }))
+          if (p.actions?.length) setTimeout(refreshTickets, 0)
+        }
+      })
+    } catch {
+      updateLastBot(m => ({
+        ...m,
+        streaming: false,
         content: "Couldn't reach the server just now. Try again in a moment.",
-        timestamp: new Date(),
         matchType: 'fallback',
         networkError: true
-      }])
+      }))
     } finally {
       setIsLoading(false)
     }
   }
+
+  // Tickets created on another path (e.g. the lease checker) need the panel
+  // refreshed once the session id they were created under is in place.
+  useEffect(() => { if (!isLoading) refreshTickets() }, [isLoading, refreshTickets])
 
   const handleTopicClick = (topic) => sendMessage(topic.starter)
   const handleSubmit = (e) => { e.preventDefault(); sendMessage(textInput) }
@@ -246,22 +348,25 @@ const Chatbot = () => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(textInput) }
   }
 
-  // Starts a fresh session rather than deleting the old one's data — the
-  // whole point of Stage 5 is that a session's history/tickets persist, so
-  // "new chat" abandons the id instead of wiping it out of the database.
+  // Starts a fresh session rather than deleting the old one's data — a
+  // session's history/tickets persist, so "new chat" abandons the id instead
+  // of wiping it out of the database.
   const startNewChat = () => {
     setMessages([])
     setTextInput('')
     setSessionId(null)
+    setTickets([])
+    setMode('chat')
+    lastMessageId.current = 0
     seenRows.current = new Set()
-    try { sessionStorage.removeItem(SESSION_STORAGE_KEY) } catch { /* best-effort */ }
   }
 
   const focusInput = () => inputRef.current?.focus()
+  const sourcesLabel = totalSources ? ` + ${totalSources} official passages` : ''
 
   return (
     <div className="flex h-dvh w-full flex-col overflow-hidden bg-background text-foreground">
-      <header className="sticky top-0 z-20 flex shrink-0 items-center justify-between border-b border-border/70 bg-background/75 px-4 py-3 backdrop-blur-md md:px-6">
+      <header className="sticky top-0 z-20 flex shrink-0 items-center justify-between gap-2 border-b border-border/70 bg-background/75 px-4 py-3 backdrop-blur-md md:px-6">
         <div className="flex items-center gap-2.5">
           <span
             className="flex h-8 w-8 items-center justify-center rounded-full text-white shadow-glow"
@@ -269,30 +374,53 @@ const Chatbot = () => {
           >
             <Sparkles className="h-4 w-4" />
           </span>
-          <span className="font-serif text-[16px] font-medium tracking-tight">OCC Assistant</span>
+          <span className="hidden font-serif text-[16px] font-medium tracking-tight sm:inline">OCC Assistant</span>
         </div>
+
+        <nav className="flex items-center gap-0.5 rounded-full border border-border bg-panel/80 p-0.5 shadow-sm" aria-label="Mode">
+          {MODES.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => setMode(key)}
+              aria-pressed={mode === key}
+              className={cn(
+                'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12.5px] font-medium transition-colors sm:px-3',
+                mode === key ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{label}</span>
+            </button>
+          ))}
+        </nav>
+
         <div className="flex items-center gap-1.5">
           <Sheet open={activityOpen} onOpenChange={setActivityOpen}>
             <SheetTrigger asChild>
               <Button variant="ghost" size="sm" className="gap-1.5 rounded-full text-muted-foreground">
                 <ListChecks className="h-4 w-4" />
-                <span className="hidden sm:inline">Activity</span>
+                <span className="hidden md:inline">Tickets</span>
                 {tickets.length > 0 && <Badge variant="primary">{tickets.length}</Badge>}
               </Button>
             </SheetTrigger>
             <SheetContent side="right">
-              <ActivityPanel tickets={tickets} totalFAQs={totalFAQs} />
+              <ActivityPanel tickets={tickets} totalFAQs={totalFAQs} totalSources={totalSources || 0} />
             </SheetContent>
           </Sheet>
-          <Button variant="ghost" size="sm" className="gap-1.5 rounded-full text-muted-foreground" onClick={startNewChat}>
+          <Button variant="ghost" size="sm" className="gap-1.5 rounded-full text-muted-foreground" onClick={startNewChat} aria-label="New chat">
             <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">New chat</span>
+            <span className="hidden md:inline">New chat</span>
           </Button>
         </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {isWelcome && (
+        {mode === 'lease' && (
+          <LeaseChecker sessionId={sessionId} onSessionId={setSessionId} onTicketCreated={refreshTickets} />
+        )}
+        {mode === 'listing' && <ScamChecker />}
+
+        {mode === 'chat' && isWelcome && (
           <div ref={welcomeRef} className="mx-auto flex min-h-full max-w-2xl flex-col items-center justify-center gap-7 px-5 py-6">
             <div className="js-hero relative w-full shrink-0 overflow-hidden rounded-[28px] border border-border bg-panel px-6 py-11 text-center shadow-glow">
               <div
@@ -311,16 +439,38 @@ const Chatbot = () => {
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
                     <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
                   </span>
-                  Live · answering from {totalFAQs} FAQs
+                  Live · {totalFAQs} FAQs{sourcesLabel}
                 </div>
 
                 <h1 className="max-w-md text-balance text-[30px] font-semibold leading-[1.1] tracking-tight text-foreground md:text-[38px]">
                   What do you need to <span className="font-serif italic font-medium text-gradient-brand">sort out</span>?
                 </h1>
                 <p className="max-w-sm text-[14px] leading-relaxed text-muted-foreground">
-                  Housing, rent, transit, health, food, and campus rules — grounded in real OCC FAQ entries.
+                  Housing, rent, transit, health, food, and campus rules — grounded in OCC FAQs and cited official UW and Ontario pages.
                 </p>
               </div>
+            </div>
+
+            <div className="grid w-full shrink-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
+              {[
+                { key: 'lease', title: 'Check my lease', hint: 'Flags clauses Ontario says are void', icon: FileSearch, hue: 42 },
+                { key: 'listing', title: 'Is this listing a scam?', hint: 'Checks an ad against UW fraud warnings', icon: ScanSearch, hue: 15 }
+              ].map(tool => (
+                <button
+                  key={tool.key}
+                  onClick={() => setMode(tool.key)}
+                  className="js-tile group flex items-center gap-3 rounded-2xl border border-border bg-panel px-4 py-3.5 text-left shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-lg"
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-glow" style={{ background: 'var(--gradient-brand)' }}>
+                    <tool.icon className="h-5 w-5" />
+                  </span>
+                  <span className="flex flex-col">
+                    <span className="text-[14px] font-semibold text-foreground">{tool.title}</span>
+                    <span className="text-[12px] text-muted-foreground">{tool.hint}</span>
+                  </span>
+                  <ArrowUpRight className="ml-auto h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                </button>
+              ))}
             </div>
 
             <div className="grid w-full shrink-0 grid-cols-2 gap-2.5 sm:grid-cols-3">
@@ -347,7 +497,7 @@ const Chatbot = () => {
             </div>
 
             <div className="flex w-full shrink-0 flex-col items-center gap-2.5">
-              <div className="font-mono text-[10px] tracking-[0.16em] text-muted-foreground/70 uppercase">Asked this week</div>
+              <div className="font-mono text-[10px] tracking-[0.16em] text-muted-foreground/70 uppercase">Try asking</div>
               <div className="flex flex-wrap justify-center gap-2">
                 {POPULAR_QUESTIONS.map(q => (
                   <button
@@ -363,7 +513,7 @@ const Chatbot = () => {
           </div>
         )}
 
-        {!isWelcome && (
+        {mode === 'chat' && !isWelcome && (
           <div className="mx-auto flex max-w-2xl flex-col gap-6 px-5 py-6 md:px-0">
             {messages.map((m, i) => (
               <div
@@ -373,108 +523,117 @@ const Chatbot = () => {
                   if (m.role === 'bot' && i === messages.length - 1) lastBotRowRef.current = el
                 }}
               >
-                {m.role === 'user' ? (
+                {m.role === 'user' && (
                   <div className="flex justify-end">
                     <div className="max-w-[75%] whitespace-pre-line rounded-2xl bg-muted px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground">
                       {m.content}
                     </div>
                   </div>
-                ) : (
+                )}
+
+                {m.role === 'staff' && (
                   <div className="flex items-start gap-3">
-                    <span
-                      className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white shadow-glow"
-                      style={{ background: 'var(--gradient-brand)' }}
-                    >
-                      <Sparkles className="h-3.5 w-3.5" />
+                    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
+                      <UserRound className="h-3.5 w-3.5" />
                     </span>
-                    <div className="min-w-0 flex-1 flex-col gap-1.5">
-                      <Badge variant={m.matchType === 'faq' ? 'primary' : 'default'} className="mb-1.5">
-                        OCC · {m.matchType === 'faq' ? m.category : 'Fallback match'}
-                      </Badge>
-                      <div className="prose prose-sm max-w-none leading-relaxed text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-a:text-primary prose-code:text-primary prose-blockquote:border-l-primary/50 prose-blockquote:text-muted-foreground prose-hr:border-border prose-th:text-foreground prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 first:prose-p:mt-0 last:prose-p:mb-0">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{cleanMarkdown(m.content)}</ReactMarkdown>
+                    <div className="min-w-0 flex-1 rounded-2xl border border-primary/30 bg-primary/5 px-4 py-3">
+                      <Badge variant="primary" className="mb-1.5">Reply from OCC staff</Badge>
+                      <div className="prose prose-sm max-w-none text-foreground prose-p:my-1">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{m.content}</ReactMarkdown>
                       </div>
+                      <div className="mt-1 font-mono text-[10px] text-muted-foreground/60">{formatTime(m.timestamp)}</div>
+                    </div>
+                  </div>
+                )}
+
+                {m.role === 'bot' && (
+                  <div className="flex items-start gap-3">
+                    <BotAvatar />
+                    <div className="min-w-0 flex-1 flex-col gap-1.5">
+                      {!m.streaming && !m.restored && (
+                        <Badge variant={m.matchType === 'faq' || m.matchType === 'official' ? 'primary' : m.matchType === 'escalation' ? 'destructive' : 'default'} className="mb-1.5">
+                          {m.matchType === 'faq' || m.matchType === 'official' ? `OCC · ${m.category}` : m.matchType === 'escalation' ? 'Urgent · escalated to a person' : 'OCC · General answer'}
+                        </Badge>
+                      )}
+                      {m.content ? (
+                        <div className="prose prose-sm max-w-none leading-relaxed text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-a:text-primary prose-a:no-underline hover:prose-a:underline prose-code:text-primary prose-blockquote:border-l-primary/50 prose-blockquote:text-muted-foreground prose-hr:border-border prose-th:text-foreground prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 first:prose-p:mt-0 last:prose-p:mb-0">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{prepareMarkdown(m.content, m.citations)}</ReactMarkdown>
+                        </div>
+                      ) : (
+                        <span className="flex gap-1 pt-2">
+                          {[0, 1, 2].map(d => (
+                            <span key={d} className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary" style={{ animationDelay: `${d * 0.15}s` }} />
+                          ))}
+                        </span>
+                      )}
+                      {!m.streaming && <Citations citations={m.citations} />}
                       {m.groqDown && (
                         <div className="mt-1.5 rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-xs leading-relaxed text-destructive">
                           Groq is unavailable right now — this is a fallback keyword match, not a generated answer.
                         </div>
                       )}
-                      {!m.groqDown && m.matchType === 'fallback' && !m.networkError && (
-                        <div className="mt-1 text-[11.5px] text-muted-foreground/70">No specific FAQ matched — this answer draws on general knowledge instead.</div>
+                      {!m.groqDown && !m.streaming && m.matchType === 'fallback' && !m.networkError && (
+                        <div className="mt-1 text-[11.5px] text-muted-foreground/70">No FAQ or official page matched — this answer draws on general knowledge instead.</div>
                       )}
-                      {!m.networkError && (
-                        <div className="mt-1.5 font-mono text-[10.5px] leading-relaxed text-muted-foreground/60">{traceSummary(m)}</div>
+                      {!m.networkError && !m.restored && (
+                        <AgentTrace steps={m.steps} live={m.streaming} memoryTurns={m.memoryTurns} />
                       )}
-                      <div className="mt-1 font-mono text-[10px] text-muted-foreground/50">{formatTime(m.timestamp)}</div>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        <Button variant="outline" size="sm" className="h-auto rounded-full px-3 py-1.5 text-[12.5px] font-normal" onClick={focusInput}>
-                          Ask something else
-                        </Button>
-                        <Button variant="outline" size="sm" className="h-auto rounded-full px-3 py-1.5 text-[12.5px] font-normal" onClick={startNewChat}>
-                          Start a new topic
-                        </Button>
-                      </div>
+                      {!m.streaming && (
+                        <>
+                          <div className="mt-1.5 font-mono text-[10px] text-muted-foreground/50">{formatTime(m.timestamp)}</div>
+                          {i === messages.length - 1 && !m.restored && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              <Button variant="outline" size="sm" className="h-auto rounded-full px-3 py-1.5 text-[12.5px] font-normal" onClick={focusInput}>
+                                Ask a follow-up
+                              </Button>
+                              <Button variant="outline" size="sm" className="h-auto rounded-full px-3 py-1.5 text-[12.5px] font-normal" onClick={startNewChat}>
+                                Start a new topic
+                              </Button>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
               </div>
             ))}
-            {isLoading && (
-              <div className="flex items-start gap-3">
-                <span
-                  className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white shadow-glow"
-                  style={{ background: 'var(--gradient-brand)' }}
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                </span>
-                <div className="flex items-center gap-2 pt-1.5 font-mono text-xs text-muted-foreground">
-                  Checking the {totalFAQs}-FAQ index
-                  <span className="flex gap-1">
-                    {[0, 1, 2].map(i => (
-                      <span
-                        key={i}
-                        className="h-1 w-1 animate-bounce rounded-full bg-primary"
-                        style={{ animationDelay: `${i * 0.15}s` }}
-                      />
-                    ))}
-                  </span>
-                </div>
-              </div>
-            )}
             <div ref={bodyEndRef} />
           </div>
         )}
       </div>
 
-      <div className="shrink-0 px-4 pb-4 md:px-0">
-        <form
-          onSubmit={handleSubmit}
-          className="mx-auto flex max-w-2xl items-end gap-2 rounded-full border border-border bg-panel px-4 py-2 shadow-sm transition-shadow duration-200 focus-within:border-transparent focus-within:shadow-glow"
-        >
-          <Textarea
-            ref={inputRef}
-            rows={1}
-            placeholder="Ask about leases, rent, transit, food, anything off campus…"
-            value={textInput}
-            onChange={(e) => setTextInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isLoading}
-            className="max-h-[120px] py-2"
-          />
-          <button
-            type="submit"
-            disabled={isLoading || !textInput.trim()}
-            aria-label="Send"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white transition-transform duration-150 disabled:cursor-not-allowed disabled:opacity-40 enabled:hover:scale-105"
-            style={{ background: 'var(--gradient-brand)' }}
+      {mode === 'chat' && (
+        <div className="shrink-0 px-4 pb-4 md:px-0">
+          <form
+            onSubmit={handleSubmit}
+            className="mx-auto flex max-w-2xl items-end gap-2 rounded-full border border-border bg-panel px-4 py-2 shadow-sm transition-shadow duration-200 focus-within:border-transparent focus-within:shadow-glow"
           >
-            <SendHorizontal className="h-4 w-4" />
-          </button>
-        </form>
-        <div className="mx-auto mt-2 max-w-2xl text-center text-[11px] leading-relaxed text-muted-foreground/70">
-          General guidance only, not official advice — check anything urgent with WUSA or UW directly.
+            <Textarea
+              ref={inputRef}
+              rows={1}
+              placeholder="Ask about leases, rent, transit, food, anything off campus…"
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isLoading}
+              className="max-h-[120px] py-2"
+            />
+            <button
+              type="submit"
+              disabled={isLoading || !textInput.trim()}
+              aria-label="Send"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white transition-transform duration-150 disabled:cursor-not-allowed disabled:opacity-40 enabled:hover:scale-105"
+              style={{ background: 'var(--gradient-brand)' }}
+            >
+              <SendHorizontal className="h-4 w-4" />
+            </button>
+          </form>
+          <div className="mx-auto mt-2 max-w-2xl text-center text-[11px] leading-relaxed text-muted-foreground/70">
+            General guidance only, not official advice — check anything urgent with WUSA or UW directly.
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

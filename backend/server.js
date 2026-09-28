@@ -1,4 +1,7 @@
 const express = require('express');
+// Routes rejected promises from async handlers to the error middleware at the
+// bottom instead of leaving an unhandled rejection and a hung request.
+require('express-async-errors');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
@@ -6,12 +9,17 @@ const crypto = require('crypto');
 require('dotenv').config();
 
 const { db } = require('./db');
+const { createIndex } = require('./lib/bm25');
+const critic = require('./lib/critic');
+const { analyzeLease } = require('./lib/lease');
+const { analyzeListing } = require('./lib/scam');
 
 // Groq AI
 const Groq = require('groq-sdk');
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY
 });
+const MODEL = 'openai/gpt-oss-20b';
 
 // Nodemailer — jsonTransport never opens a network connection or sends real
 // mail; it just returns the composed message as JSON. Safe default for a demo.
@@ -25,6 +33,8 @@ const PORT = process.env.PORT || 5000;
 
 // Diagnostics for env
 console.log('Groq enabled:', !!process.env.GROQ_API_KEY);
+console.log('Database:', db.kind);
+console.log('Staff dashboard:', process.env.STAFF_TOKEN ? 'enabled' : 'disabled (no STAFF_TOKEN)');
 
 // Load FAQ data
 let faqData = {};
@@ -37,81 +47,168 @@ try {
   console.error('Error loading FAQ data:', error);
 }
 
+// Official passages (UW Off-Campus Housing, Government of Ontario, UW Special
+// Constable Service), scraped by scripts/build-sources.js and committed, so
+// answers can cite a real page instead of the model's memory.
+const officialSources = require('./sources/official.json');
+const sourcesById = Object.fromEntries(officialSources.map(s => [s.id, s]));
+const sourceIndex = createIndex(officialSources, s => `${s.heading} ${s.text}`);
+const SOURCE_MIN_SCORE = 6;
+// The passages cover tenancy, leases, rent, and rental fraud — only look them
+// up for intents where that's relevant (null = router failed, so don't gate).
+const SOURCE_INTENTS = new Set(['housing', 'rent_money', null]);
+
+// Students and official pages describe the same thing in different words.
+// BM25 is purely lexical, so bridge the most common gaps explicitly.
+const QUERY_SYNONYMS = {
+  fix: 'repair maintenance', fixed: 'repair maintenance', broken: 'repair maintenance', heat: 'repair maintenance',
+  heater: 'repair maintenance', mold: 'repair maintenance', leak: 'repair maintenance',
+  sublet: 'assign assignment', sublease: 'sublet assign', subletting: 'sublet assign',
+  raise: 'increase guideline', hike: 'increase guideline',
+  kick: 'evict eviction terminate', kicked: 'evict eviction terminate', evicted: 'eviction', evicting: 'eviction',
+  scam: 'fraud scam', scammed: 'fraud scam', fake: 'fraud scam',
+  enter: 'entry notice', entering: 'entry notice', barge: 'entry notice'
+};
+function expandQuery(query) {
+  const extra = query.toLowerCase().split(/[^a-z']+/).map(w => QUERY_SYNONYMS[w]).filter(Boolean);
+  return extra.length ? `${query} ${extra.join(' ')}` : query;
+}
+console.log(`Official sources loaded: ${officialSources.length} passages`);
+
 // Middleware
 app.use(cors());
-app.use(express.json());
+// Lease PDFs arrive base64-encoded in JSON; Vercel caps request bodies at 4.5 MB.
+app.use(express.json({ limit: '6mb' }));
 
-// Stage 5: persistent storage (SQLite via db.js) — sessions, messages,
-// tickets, and critic decisions all survive a restart now, scoped per session
-// so two concurrent students never share history the way the old global
-// in-memory array did.
-const insertSession = db.prepare('INSERT OR IGNORE INTO sessions (id, created_at) VALUES (?, ?)');
-const insertMessage = db.prepare('INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)');
-const selectRecentMessages = db.prepare('SELECT role, content, timestamp FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?');
-const deleteSessionMessages = db.prepare('DELETE FROM messages WHERE session_id = ?');
+const now = () => new Date().toISOString();
 
-const insertTicket = db.prepare(`
-  INSERT INTO tickets (id, session_id, category, summary, priority, status, original_message, created_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-`);
-const selectTicket = db.prepare('SELECT * FROM tickets WHERE id = ?');
-const selectAllTickets = db.prepare('SELECT * FROM tickets ORDER BY created_at DESC');
-const updateTicketEscalation = db.prepare('UPDATE tickets SET escalated = 1, status = ?, escalation_reason = ? WHERE id = ?');
-const updateTicketEmails = db.prepare('UPDATE tickets SET emails_json = ? WHERE id = ?');
+// ---------------------------------------------------------------------------
+// Persistence helpers (SQLite via db.js)
+// ---------------------------------------------------------------------------
 
-const insertCriticLog = db.prepare(`
-  INSERT INTO critic_log (session_id, timestamp, message, intent, router_confidence, match_type, flags_json, reasoning)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-`);
-const selectCriticLog = db.prepare('SELECT * FROM critic_log ORDER BY id DESC LIMIT ?');
-
-function findTicket(ticketId) {
-  return selectTicket.get(ticketId);
+async function findTicket(ticketId) {
+  return db.get('SELECT * FROM tickets WHERE id = ?', [ticketId]);
 }
 
-// Groq helper
-async function generateWithGroq(message, faqContext = '') {
+async function recentMessages(sessionId, limit) {
+  const rows = await db.all('SELECT id, role, content, timestamp FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?', [sessionId, limit]);
+  return rows.reverse();
+}
+
+function formatTicket(row, replies = []) {
+  const { emails_json, ...ticket } = row;
+  return { ...ticket, escalated: !!ticket.escalated, emails: JSON.parse(emails_json || '[]'), replies };
+}
+
+// ---------------------------------------------------------------------------
+// Multi-turn memory: the last few turns of this session go to the router, the
+// answer generator, and the action agent, so a follow-up like "what should I
+// do next?" is understood in the context of what came before.
+// ---------------------------------------------------------------------------
+
+const HISTORY_TURNS = 6;
+const HISTORY_CHARS = 1200;
+
+function historyAsChat(history) {
+  return history.map(m => ({
+    role: m.role === 'user' ? 'user' : 'assistant',
+    content: (m.role === 'staff' ? '[Reply from OCC staff] ' : '') + m.content.slice(0, HISTORY_CHARS)
+  }));
+}
+
+function historyAsText(history, turns = 4) {
+  return history.slice(-turns)
+    .map(m => `${m.role === 'user' ? 'Student' : m.role === 'staff' ? 'Staff' : 'Assistant'}: ${m.content.slice(0, 400)}`)
+    .join('\n');
+}
+
+// Follow-ups ("what if they still ignore me?") carry little to search on by
+// themselves, so retrieval borrows the student's previous message.
+function contextualQuery(message, history) {
+  const previousUser = [...history].reverse().find(m => m.role === 'user');
+  if (!previousUser || message.split(/\s+/).length >= 15) return message;
+  return `${previousUser.content} ${message}`;
+}
+
+// ---------------------------------------------------------------------------
+// Groq helpers
+// ---------------------------------------------------------------------------
+
+const ANSWER_SYSTEM_PROMPT = `You are a helpful assistant for University of Waterloo off-campus students. Be friendly, empathetic, practical, and concise.
+
+You may be given two kinds of context:
+- FAQ entries curated by the Off-Campus Community team.
+- Numbered official passages, e.g. [1], from UW Off-Campus Housing, the Government of Ontario, or UW Special Constable Service.
+
+Ground your answer in that context. When a sentence relies on an official passage, cite it inline with its number, like [1]. Only cite numbers you were given, and never invent a source. Never state specific form numbers, fees, phone numbers, deadlines, or percentages unless they appear in the context. If the context doesn't cover the question, say so briefly and give careful general guidance focused on student life in Waterloo.`;
+
+async function generateAnswer({ message, faqs = [], sources = [], history = [], onToken = null }) {
+  const contextParts = [];
+  if (faqs.length) {
+    contextParts.push('FAQ entries:\n' + faqs.map(f => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n'));
+  }
+  if (sources.length) {
+    contextParts.push('Official passages:\n' + sources.map((s, i) => `[${i + 1}] ${s.publisher} — ${s.heading}\n${s.text}`).join('\n\n'));
+  }
+  const userContent = contextParts.length
+    ? `${contextParts.join('\n\n')}\n\nStudent question: ${message}`
+    : `Student question: ${message}`;
+
+  const request = {
+    model: MODEL,
+    messages: [
+      { role: 'system', content: ANSWER_SYSTEM_PROMPT },
+      ...historyAsChat(history),
+      { role: 'user', content: userContent }
+    ],
+    temperature: 0.7,
+    max_tokens: 1400
+  };
+
   try {
-    const prompt = faqContext 
-      ? `You are a helpful assistant for University of Waterloo off-campus students.
+    if (!onToken) {
+      const completion = await groq.chat.completions.create(request);
+      return completion.choices[0]?.message?.content?.trim() || null;
+    }
 
-Here are relevant FAQs:
-${faqContext}
-
-Student question: ${message}
-
-Provide a helpful, friendly answer based on the FAQs above. If the FAQs don't cover it, use your knowledge but stay focused on student life at UWaterloo. Be empathetic and action-oriented.`
-      : `You are a helpful assistant for University of Waterloo off-campus students. 
-
-Student question: ${message}
-
-Provide a helpful, friendly, and practical answer about off-campus student life at UWaterloo. Be empathetic and action-oriented.`;
-
-    const completion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: "system",
-          content: "You are a helpful assistant for University of Waterloo off-campus students."
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      model: "openai/gpt-oss-20b",
-      temperature: 0.7,
-      max_tokens: 1024,
-    });
-
-    return completion.choices[0]?.message?.content?.trim() || "Sorry, I couldn't generate a response.";
+    // Streamed: tokens are forwarded to the client as they arrive.
+    const stream = await groq.chat.completions.create({ ...request, stream: true });
+    let text = '';
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content;
+      if (delta) {
+        text += delta;
+        onToken(delta);
+      }
+    }
+    return text.trim() || null;
   } catch (error) {
-    console.error('Groq API Error:', error);
+    console.error('Groq API Error:', error?.message || error);
     return null;
   }
 }
 
+// JSON-mode completion used by the lease and listing checkers.
+async function completeJSON(system, user) {
+  const completion = await groq.chat.completions.create({
+    model: MODEL,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user }
+    ],
+    temperature: 0,
+    // gpt-oss spends part of its budget on hidden reasoning before the JSON.
+    max_tokens: 2500,
+    response_format: { type: 'json_object' }
+  });
+  return completion.choices[0]?.message?.content || '';
+}
+
+// ---------------------------------------------------------------------------
 // Stage 1: Router agent — classifies intent before any retrieval happens.
 // Maps each in-scope intent to the FAQ category retrieval should be scoped to.
+// ---------------------------------------------------------------------------
+
 const INTENT_CATEGORY_MAP = {
   housing: 'Housing & Leases',
   health_safety: 'Health & Safety',
@@ -125,7 +222,7 @@ const INTENT_CATEGORY_MAP = {
 const VALID_INTENTS = [...Object.keys(INTENT_CATEGORY_MAP), 'urgent', 'out_of_scope'];
 
 const ROUTER_SYSTEM_PROMPT = `You are an intent router for a University of Waterloo off-campus student support chatbot.
-Classify the student's message into exactly one intent:
+Classify the student's NEW message into exactly one intent. Earlier conversation, if given, is only context for interpreting short follow-ups.
 - housing: leases, landlords, maintenance, roommates, moving
 - health_safety: physical/mental health, safety concerns, harassment (non-urgent)
 - rent_money: rent, budgeting, deposits, bills, financial aid
@@ -141,7 +238,12 @@ Respond with ONLY strict JSON, no prose: {"intent": "<one of the above>", "confi
 
 // Calls Groq to classify intent. Returns null on any failure so the caller
 // can fall back to the pre-router behavior rather than breaking the chat.
-async function classifyIntent(message) {
+async function classifyIntent(message, history = []) {
+  const context = historyAsText(history, 2);
+  const userContent = context
+    ? `Earlier conversation (context only):\n${context}\n\nNew message to classify: ${message}`
+    : message;
+
   // Two attempts. The eval run showed json_validate_failed sometimes comes
   // back as an empty completion, and at temperature 0 it's deterministic —
   // retrying with the exact same input reliably reproduces the same empty
@@ -152,9 +254,9 @@ async function classifyIntent(message) {
       const completion = await groq.chat.completions.create({
         messages: [
           { role: 'system', content: ROUTER_SYSTEM_PROMPT },
-          { role: 'user', content: message }
+          { role: 'user', content: userContent }
         ],
-        model: 'openai/gpt-oss-20b',
+        model: MODEL,
         temperature: attempt === 0 ? 0 : 0.4,
         // gpt-oss-20b spends some of its budget on hidden reasoning tokens
         // before emitting the JSON; 100 was too tight and truncated mid-object
@@ -184,15 +286,15 @@ Please reach out directly:
 • **Waterloo Regional Police (non-emergency)**: 519-570-9777
 • **Good2Talk (student mental health line)**: 1-866-925-5454
 
-A human follow-up option for this kind of message is coming in a later stage of this project.`;
+This conversation has also been flagged for follow-up by a person, and any reply will show up right here — but please don't wait on that if you're in danger. Use the numbers above.`;
 
 // Function to search FAQ for matching questions
 function searchFAQ(userMessage) {
   const message = userMessage.toLowerCase().trim();
-  
+
   // FAQ is now a simple array of objects with question/answer properties
   const allFAQs = Array.isArray(faqData) ? faqData : [];
-  
+
   // First pass: Look for exact matches
   for (const faq of allFAQs) {
     const question = faq.question.toLowerCase();
@@ -276,7 +378,7 @@ function findRelevantFAQs(question, topN = 3, category = null) {
   const scoredFAQs = allFAQs.map(faq => {
     const fq = faq.question.toLowerCase();
     let score = 0;
-    
+
     // Exact match
     if (fq === message) score = 100;
     // Off-campus specific
@@ -291,7 +393,7 @@ function findRelevantFAQs(question, topN = 3, category = null) {
     else if (fq.includes(message) || message.includes(fq)) {
       const overlap = Math.min(message.length, fq.length) / Math.max(message.length, fq.length);
       score = overlap > 0.6 ? 70 : 40;
-    } 
+    }
     // Word-based matching
     else {
       const m = message.split(' ').filter(w => w.length > 2);
@@ -302,89 +404,120 @@ function findRelevantFAQs(question, topN = 3, category = null) {
         score = ratio >= 0.5 ? 60 : 30;
       }
     }
-    
+
     return { faq, score };
   });
-  
+
   // Sort by score descending and return top N
   scoredFAQs.sort((a, b) => b.score - a.score);
   return scoredFAQs.slice(0, topN).filter(item => item.score > 0).map(item => item.faq);
 }
 
+// Official passages relevant to the question, ranked by BM25.
+function findOfficialSources(query, intent, topN = 3) {
+  if (!SOURCE_INTENTS.has(intent)) return [];
+  return sourceIndex.search(expandQuery(query), { topN, minScore: SOURCE_MIN_SCORE }).map(r => r.doc);
+}
+
+// gpt-oss often writes citations as 【1】 or 【1†source】 — normalize to [1].
+function normalizeCitations(text) {
+  return text ? text.replace(/【\s*(\d+)[^】]*】/g, '[$1]') : text;
+}
+
+// Which of the numbered passages the answer actually cited, e.g. "[2]".
+function toCitations(sources, answer) {
+  return sources.map((s, i) => ({
+    n: i + 1,
+    id: s.id,
+    title: s.heading,
+    publisher: s.publisher,
+    url: s.url,
+    cited: new RegExp(`\\[${i + 1}\\]`).test(answer || '')
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // Stage 2: Retrieval agent. Given the router's intent, pulls FAQ entries
-// scoped to that intent's category (existing scoring, no vector DB) and
-// generates a grounded answer. On Groq failure, falls back to direct FAQ
-// match, then to the keyword responder. Always returns the same shape so
-// the /chat route stays a thin dispatcher over router/retrieval/escalation.
-async function retrievalAgent(message, intent) {
+// scoped to that intent's category plus official passages (BM25, no vector
+// DB), and generates a grounded answer. On Groq failure, falls back to direct
+// FAQ match, then to the keyword responder.
+// ---------------------------------------------------------------------------
+
+async function retrievalAgent(message, intent, { history = [], onToken = null, onRetrieved = null } = {}) {
   const scopedCategory = intent ? INTENT_CATEGORY_MAP[intent] : null;
-  const relevantFAQs = findRelevantFAQs(message, 3, scopedCategory);
-  console.log('Retrieval agent found', relevantFAQs.length, 'FAQs', scopedCategory ? `(scoped to ${scopedCategory})` : '(unscoped)');
+  const query = contextualQuery(message, history);
 
-  const context = relevantFAQs.map(faq =>
-    `Q: ${faq.question}\nA: ${faq.answer}`
-  ).join('\n\n');
+  let relevantFAQs = findRelevantFAQs(message, 3, scopedCategory);
+  if (relevantFAQs.length === 0 && query !== message) relevantFAQs = findRelevantFAQs(query, 3, scopedCategory);
+  const sources = findOfficialSources(query, intent);
+  console.log('Retrieval agent found', relevantFAQs.length, 'FAQs and', sources.length, 'official passages', scopedCategory ? `(scoped to ${scopedCategory})` : '(unscoped)');
+  onRetrieved?.({ faqs: relevantFAQs.map(f => f.question), sources: sources.map(s => ({ id: s.id, title: s.heading, publisher: s.publisher })) });
 
-  try {
-    const generated = await generateWithGroq(message, context);
-    if (!generated || generated.includes("Sorry, I couldn't generate")) {
-      throw new Error('Groq returned empty response');
-    }
-    console.log('Retrieval agent: Groq generated response with FAQ context');
-
-    // Grounded in a real FAQ only if a relevant one was actually found
-    const matchType = relevantFAQs.length > 0 ? 'faq' : 'fallback';
-    const category = relevantFAQs.length > 0 ? relevantFAQs[0].category : null;
+  const generated = normalizeCitations(await generateAnswer({ message, faqs: relevantFAQs, sources, history, onToken }));
+  if (generated) {
+    console.log('Retrieval agent: Groq generated response with FAQ/official context');
+    // Grounded in a real FAQ or official passage only if one was actually found
+    const matchType = relevantFAQs.length > 0 ? 'faq' : sources.length > 0 ? 'official' : 'fallback';
+    const category = relevantFAQs.length > 0 ? relevantFAQs[0].category : sources.length > 0 ? sources[0].publisher : null;
 
     return {
       response: generated,
-      source: 'groq_with_faq_context',
+      source: 'groq_with_context',
       matchType,
       category,
+      citations: toCitations(sources, generated),
       metadata: {
         intent,
         relevantFAQs: relevantFAQs.map(f => f.question),
-        faqCount: relevantFAQs.length
+        faqCount: relevantFAQs.length,
+        sourceCount: sources.length
       }
     };
-  } catch (groqError) {
-    console.error('Retrieval agent: Groq error:', groqError?.message || groqError);
+  }
 
-    const faqMatch = searchFAQ(message);
-    if (faqMatch) {
-      console.log('Retrieval agent: used FAQ fallback');
-      return {
-        response: faqMatch.answer,
-        source: 'faq_fallback',
-        matchType: 'faq',
-        category: faqMatch.category,
-        metadata: { intent, error: 'groq_failed' }
-      };
-    }
-
-    console.log('Retrieval agent: used intelligent response fallback');
+  console.error('Retrieval agent: Groq returned nothing, using fallbacks');
+  const faqMatch = searchFAQ(message);
+  if (faqMatch) {
+    console.log('Retrieval agent: used FAQ fallback');
     return {
-      response: getIntelligentResponse(message),
-      source: 'intelligent_response',
-      matchType: 'fallback',
-      category: null,
+      response: faqMatch.answer,
+      source: 'faq_fallback',
+      matchType: 'faq',
+      category: faqMatch.category,
+      citations: [],
       metadata: { intent, error: 'groq_failed' }
     };
   }
+
+  console.log('Retrieval agent: used intelligent response fallback');
+  return {
+    response: getIntelligentResponse(message),
+    source: 'intelligent_response',
+    matchType: 'fallback',
+    category: null,
+    citations: [],
+    metadata: { intent, error: 'groq_failed' }
+  };
 }
 
+// ---------------------------------------------------------------------------
 // Stage 3: Action agent tools. Each one is a real side effect, not text —
 // the model decides whether/which to call via function calling below.
-function createTicketRecord({ category, summary, priority }, message, intent, sessionId) {
+// ---------------------------------------------------------------------------
+
+async function createTicketRecord({ category, summary, priority }, message, intent, sessionId) {
   const id = `T-${crypto.randomUUID().slice(0, 8)}`;
-  const createdAt = new Date().toISOString();
-  insertTicket.run(id, sessionId, category || intent || 'general', summary || message, priority || 'normal', 'open', message, createdAt);
+  await db.run(
+    `INSERT INTO tickets (id, session_id, category, summary, priority, status, original_message, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, sessionId, category || intent || 'general', summary || message, priority || 'normal', 'open', message, now()]
+  );
   console.log('Action agent: created ticket', id, category, priority);
   return { ticketId: id, status: 'open' };
 }
 
 async function draftFollowupEmailRecord({ ticketId, to, subject, body }) {
-  const ticket = findTicket(ticketId);
+  const ticket = await findTicket(ticketId);
   if (!ticket) return { error: `No ticket found with id ${ticketId}` };
 
   // jsonTransport composes the message and returns it without sending anything.
@@ -396,17 +529,17 @@ async function draftFollowupEmailRecord({ ticketId, to, subject, body }) {
   });
 
   const emails = JSON.parse(ticket.emails_json || '[]');
-  emails.push({ to, subject, body, sentAt: new Date().toISOString(), mock: true });
-  updateTicketEmails.run(JSON.stringify(emails), ticketId);
+  emails.push({ to, subject, body, sentAt: now(), mock: true });
+  await db.run('UPDATE tickets SET emails_json = ? WHERE id = ?', [JSON.stringify(emails), ticketId]);
   console.log('Action agent: drafted follow-up email for', ticketId, '->', to);
   return { ticketId, to, subject, mock: true };
 }
 
-function escalateTicketRecord({ ticketId, reason }) {
-  const ticket = findTicket(ticketId);
+async function escalateTicketRecord({ ticketId, reason }) {
+  const ticket = await findTicket(ticketId);
   if (!ticket) return { error: `No ticket found with id ${ticketId}` };
 
-  updateTicketEscalation.run('escalated', reason, ticketId);
+  await db.run('UPDATE tickets SET escalated = 1, status = ?, escalation_reason = ? WHERE id = ?', ['escalated', reason, ticketId]);
   console.log('Action agent: escalated ticket', ticketId, '-', reason);
   return { ticketId, status: 'escalated', escalated: true };
 }
@@ -475,10 +608,11 @@ If no action is warranted, call no tools at all.`;
 // Runs a bounded function-calling loop: the model decides which tools (if
 // any) to call, we execute the real side effect, and feed the result back so
 // it can decide the next step (e.g. escalate only after seeing the ticket id).
-async function actionAgent(message, intent, category, sessionId) {
+async function actionAgent(message, intent, category, sessionId, history = []) {
+  const context = historyAsText(history, 4);
   const messages = [
     { role: 'system', content: ACTION_SYSTEM_PROMPT },
-    { role: 'user', content: `Student message: "${message}"\nClassified intent: ${intent}\nFAQ category: ${category || 'none'}` }
+    { role: 'user', content: `${context ? `Earlier conversation (context only):\n${context}\n\n` : ''}Student message: "${message}"\nClassified intent: ${intent}\nFAQ category: ${category || 'none'}` }
   ];
 
   const actionsTaken = [];
@@ -488,7 +622,7 @@ async function actionAgent(message, intent, category, sessionId) {
     for (let step = 0; step < MAX_STEPS; step++) {
       const completion = await groq.chat.completions.create({
         messages,
-        model: 'openai/gpt-oss-20b',
+        model: MODEL,
         temperature: 0,
         tools: ACTION_TOOLS,
         tool_choice: 'auto',
@@ -515,11 +649,11 @@ async function actionAgent(message, intent, category, sessionId) {
         let result;
         try {
           if (toolCall.function.name === 'create_ticket') {
-            result = createTicketRecord(args, message, intent, sessionId);
+            result = await createTicketRecord(args, message, intent, sessionId);
           } else if (toolCall.function.name === 'draft_followup_email') {
             result = await draftFollowupEmailRecord(args);
           } else if (toolCall.function.name === 'escalate_ticket') {
-            result = escalateTicketRecord(args);
+            result = await escalateTicketRecord(args);
           } else {
             result = { error: `Unknown tool: ${toolCall.function.name}` };
           }
@@ -543,86 +677,190 @@ async function actionAgent(message, intent, category, sessionId) {
 // plain FAQ lookup with nothing for a human to follow up on.
 const ACTION_AGENT_INTENTS = ['urgent', 'housing', 'health_safety'];
 
-// Stage 4: Critic agent. Deliberately rule-based, not another LLM call — a
-// safety net that depends on a second probabilistic model is a weaker safety
-// net. It runs at two points: before routing (can override the router's own
-// classification) and after the response/actions are assembled (can force an
-// escalation the action agent didn't make, flag low-confidence answers, and
-// annotate policy-sensitive content). Every decision is logged (in SQLite,
-// since Stage 5) for Stage 6's eval set, whether or not anything actually fired.
+// ---------------------------------------------------------------------------
+// Stage 4: Critic side effects. The rules live in lib/critic.js (pure); this
+// carries out what they decide and logs every decision, fired or not.
+// ---------------------------------------------------------------------------
 
-const SAFETY_SIGNAL_PHRASES = [
-  'kill myself', 'want to die', 'end my life', 'suicidal', 'suicide',
-  'hurt myself', 'self-harm', 'self harm',
-  'being abused', 'domestic violence', 'assaulted', 'sexually assaulted',
-  'hit me', 'hitting me', 'punched me', 'attacked me', 'threatened to kill',
-  'someone is trying to hurt me', 'i am in danger', "i'm in danger",
-  'not safe right now', 'unsafe right now', "don't feel safe", 'do not feel safe',
-  'stalking me'
-];
+async function applyCritic({ message, intent, routerConfidence, matchType, botResponse, actionsTaken, preCheckOverride, sessionId }) {
+  const decision = critic.postCheck({ intent, routerConfidence, matchType, botResponse, actionsTaken, preCheckOverride });
+  const actions = [...actionsTaken];
 
-function findSafetySignal(text) {
-  const lower = text.toLowerCase();
-  return SAFETY_SIGNAL_PHRASES.find(phrase => lower.includes(phrase)) || null;
-}
-
-const LEGAL_ADVICE_PHRASES = [
-  'you should sue', 'file a lawsuit', 'small claims court', 'this is illegal',
-  'you have a legal right to', 'legally required to', 'in violation of the law',
-  'landlord and tenant board', 'ltb hearing', 'take legal action', 'breach of contract'
-];
-
-function findPolicySensitivePhrase(text) {
-  const lower = text.toLowerCase();
-  return LEGAL_ADVICE_PHRASES.find(phrase => lower.includes(phrase)) || null;
-}
-
-// Runs after botResponse/matchType/category/actions are assembled but before
-// anything is sent back to the user. Can mutate the response (add a
-// disclaimer) and the actions list (force an escalation).
-function criticReview({ message, intent, routerConfidence, matchType, botResponse, actionsTaken, preCheckOverride, sessionId }) {
-  const flags = { safetyOverride: !!preCheckOverride, lowConfidence: false, policySensitive: false, escalationOverride: false };
-  const reasons = [];
-  if (preCheckOverride) reasons.push(preCheckOverride);
-
-  let response = botResponse;
-  let actions = [...actionsTaken];
-
-  // (b) low-confidence or FAQ-less answers
-  if (matchType === 'fallback' || (routerConfidence !== null && routerConfidence < 0.5)) {
-    flags.lowConfidence = true;
-    reasons.push(`no confident FAQ backing (matchType=${matchType}, routerConfidence=${routerConfidence})`);
+  for (const ticketId of decision.escalate) {
+    const reason = 'Critic override: high/urgent priority ticket was not escalated by the action agent.';
+    const result = await escalateTicketRecord({ ticketId, reason });
+    actions.push({ tool: 'escalate_ticket', args: { ticketId, reason }, result, forcedByCritic: true });
   }
 
-  // (c) policy-sensitive content (legal/landlord advice)
-  const legalPhrase = findPolicySensitivePhrase(response);
-  if (legalPhrase) {
-    flags.policySensitive = true;
-    reasons.push(`response contains legal-advice-like phrasing ("${legalPhrase}")`);
-    response += `\n\n_Note: This is general information, not legal advice. For landlord-tenant disputes, contact Waterloo Region Community Legal Services or the Landlord and Tenant Board directly._`;
+  if (decision.createUrgent) {
+    const args = { category: 'crisis', summary: 'Urgent/safety message — opened by the critic because no ticket existed.', priority: 'urgent' };
+    const created = await createTicketRecord(args, message, intent, sessionId);
+    actions.push({ tool: 'create_ticket', args, result: created, forcedByCritic: true });
+    const reason = 'Critic override: urgent message must reach a human.';
+    const escalated = await escalateTicketRecord({ ticketId: created.ticketId, reason });
+    actions.push({ tool: 'escalate_ticket', args: { ticketId: created.ticketId, reason }, result: escalated, forcedByCritic: true });
   }
 
-  // (a) urgent/safety content that should reach a human regardless of what
-  // the action agent decided — force-escalate any high/urgent ticket the
-  // action agent created but didn't escalate.
-  const createdTickets = actions.filter(a => a.tool === 'create_ticket' && a.result?.ticketId);
-  const escalatedIds = new Set(actions.filter(a => a.tool === 'escalate_ticket').map(a => a.args.ticketId));
-  for (const created of createdTickets) {
-    const ticketId = created.result.ticketId;
-    if (['high', 'urgent'].includes(created.args.priority) && !escalatedIds.has(ticketId)) {
-      const reason = 'Critic override: high/urgent priority ticket was not escalated by the action agent.';
-      const result = escalateTicketRecord({ ticketId, reason });
-      actions.push({ tool: 'escalate_ticket', args: { ticketId, reason }, result, forcedByCritic: true });
-      flags.escalationOverride = true;
-      reasons.push(`ticket ${ticketId} was priority=${created.args.priority} but wasn't escalated — critic forced it`);
-    }
-  }
+  await db.run(
+    `INSERT INTO critic_log (session_id, timestamp, message, intent, router_confidence, match_type, flags_json, reasoning)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [sessionId, now(), message, intent, routerConfidence, matchType, JSON.stringify(decision.flags), decision.reasoning]
+  );
 
-  const reasoning = reasons.length ? reasons.join('; ') : 'no critic flags raised';
-  insertCriticLog.run(sessionId, new Date().toISOString(), message, intent, routerConfidence, matchType, JSON.stringify(flags), reasoning);
-
-  return { response, actionsTaken: actions, flags };
+  return { response: decision.response, actionsTaken: actions, flags: decision.flags, reasoning: decision.reasoning };
 }
+
+// ---------------------------------------------------------------------------
+// The pipeline. `emit` receives trace events as each stage runs; /chat/stream
+// forwards them to the browser, /chat ignores them and returns the final
+// payload. Same code path either way, so the eval exercises what users get.
+// ---------------------------------------------------------------------------
+
+async function runPipeline({ message, sessionId: incomingSessionId, emit = () => {} }) {
+  // A session id ties messages/tickets/critic decisions together. The client
+  // sends back whatever id we gave it last time; if it sends none (first
+  // message, or storage was cleared), a new one is minted and returned.
+  const sessionId = incomingSessionId || crypto.randomUUID();
+  const history = await recentMessages(sessionId, HISTORY_TURNS);
+  await db.run('INSERT OR IGNORE INTO sessions (id, created_at) VALUES (?, ?)', [sessionId, now()]);
+  await db.run('INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)', [sessionId, 'user', message, now()]);
+  emit({ type: 'session', sessionId, memoryTurns: history.length });
+
+  const trace = [];
+  const stage = async (name, fn, describe) => {
+    emit({ type: 'step', stage: name, status: 'running' });
+    const started = Date.now();
+    const result = await fn();
+    const step = { stage: name, status: 'done', ms: Date.now() - started, ...describe(result) };
+    trace.push(step);
+    emit({ type: 'step', ...step });
+    return result;
+  };
+
+  console.log('Processing question:', message, 'session:', sessionId, 'memory turns:', history.length);
+
+  // Stage 1: route before any retrieval. Null means the router itself
+  // failed (Groq error/bad JSON) — treat that like the old ungated flow.
+  const routerResult = await stage('router', () => classifyIntent(message, history), r => ({
+    intent: r?.intent || null,
+    confidence: r?.confidence ?? null,
+    usedMemory: history.length > 0
+  }));
+  const routerConfidence = routerResult?.confidence ?? null;
+
+  // Stage 4a: critic pre-check — a deterministic backstop independent of
+  // the router's LLM judgment. If it fires, it wins.
+  const pre = await stage('critic_pre', async () => critic.preCheck(message, routerResult?.intent || null), r => ({
+    override: r.override
+  }));
+  const intent = pre.intent;
+  const preCheckOverride = pre.override;
+
+  let botResponse, source, metadata, category, matchType, citations = [];
+  const onToken = text => emit({ type: 'token', text });
+
+  if (intent === 'urgent') {
+    // Urgent-flag intents skip retrieval and generation entirely.
+    await stage('retrieval', async () => null, () => ({ skipped: 'urgent — fixed crisis-resources reply' }));
+    botResponse = URGENT_ESCALATION_MESSAGE;
+    onToken(botResponse);
+    source = 'router_escalation';
+    matchType = 'escalation';
+    category = null;
+    metadata = { intent, confidence: routerConfidence };
+  } else if (intent === 'out_of_scope') {
+    // Out-of-scope intents also skip retrieval; answer with general knowledge only.
+    const answer = await stage('retrieval', () => generateAnswer({ message, history, onToken }), () => ({ skipped: 'out of scope — no knowledge-base lookup' }));
+    botResponse = answer || getIntelligentResponse(message);
+    source = answer ? 'router_out_of_scope' : 'intelligent_response';
+    matchType = 'fallback';
+    category = null;
+    metadata = { intent, confidence: routerConfidence };
+    if (!answer) onToken(botResponse);
+  } else {
+    // In-scope intent (or router failed and intent is null) — hand off to
+    // the retrieval agent.
+    let retrieved = null;
+    const result = await stage(
+      'retrieval',
+      () => retrievalAgent(message, intent, { history, onToken, onRetrieved: r => { retrieved = r; emit({ type: 'retrieved', ...r }); } }),
+      r => ({ faqs: retrieved?.faqs || [], sources: retrieved?.sources || [], matchType: r.matchType, groqFailed: r.metadata?.error === 'groq_failed' })
+    );
+    botResponse = result.response;
+    if (result.metadata?.error === 'groq_failed') onToken(botResponse);
+    source = result.source;
+    matchType = result.matchType;
+    category = result.category;
+    citations = result.citations;
+    metadata = { ...result.metadata, confidence: routerConfidence };
+  }
+
+  // Stage 3: action agent — only runs for intents where a real incident
+  // (not just an FAQ lookup) might need a ticket, email, or escalation.
+  let actions = [];
+  if (ACTION_AGENT_INTENTS.includes(intent)) {
+    const actionResult = await stage('action', () => actionAgent(message, intent, category, sessionId, history), r => ({
+      actions: r.actionsTaken.map(a => ({ tool: a.tool, ticketId: a.result?.ticketId || a.args?.ticketId || null, error: a.result?.error || null }))
+    }));
+    actions = actionResult.actionsTaken;
+  } else {
+    trace.push({ stage: 'action', status: 'skipped', reason: `intent "${intent}" never needs a ticket` });
+    emit({ type: 'step', stage: 'action', status: 'skipped', reason: `intent "${intent}" never needs a ticket` });
+  }
+
+  // Stage 4b: critic review — runs before anything is sent, can annotate the
+  // response and force an escalation the action agent didn't make.
+  const reviewed = await stage('critic', () => applyCritic({ message, intent, routerConfidence, matchType, botResponse, actionsTaken: actions, preCheckOverride, sessionId }), r => ({
+    flags: r.flags,
+    reasoning: r.reasoning,
+    forced: r.actionsTaken.filter(a => a.forcedByCritic).map(a => a.tool)
+  }));
+  botResponse = reviewed.response;
+  actions = reviewed.actionsTaken;
+
+  await db.run('INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)', [sessionId, 'bot', botResponse, now()]);
+  const recent = await recentMessages(sessionId, 10);
+
+  console.log('Sending response:', { source, category, preview: botResponse.substring(0, 100) + '...', criticFlags: reviewed.flags });
+
+  return {
+    response: botResponse,
+    sessionId,
+    history: recent,
+    actions,
+    criticFlags: reviewed.flags,
+    source,
+    category,
+    matchType,
+    intent,
+    routerConfidence,
+    citations,
+    trace,
+    memoryTurns: history.length,
+    metadata
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Staff auth: a shared bearer token (STAFF_TOKEN). With no token configured,
+// staff routes are disabled rather than open — the critic log and tickets hold
+// raw student messages, including crisis text.
+// ---------------------------------------------------------------------------
+
+function requireStaff(req, res, next) {
+  const expected = process.env.STAFF_TOKEN;
+  if (!expected) return res.status(503).json({ error: 'Staff dashboard is disabled: set STAFF_TOKEN on the server.' });
+  const provided = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  const hash = s => crypto.createHash('sha256').update(s).digest();
+  if (!provided || !crypto.timingSafeEqual(hash(provided), hash(expected))) {
+    return res.status(401).json({ error: 'Invalid staff token' });
+  }
+  next();
+}
+
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 
 app.get('/', (req, res) => {
   res.json({ message: 'Chatbot API is running!' });
@@ -631,154 +869,219 @@ app.get('/', (req, res) => {
 app.get('/topics', (req, res) => {
   res.json({
     topics: topicCounts(),
-    totalFAQs: Array.isArray(faqData) ? faqData.length : 0
+    totalFAQs: Array.isArray(faqData) ? faqData.length : 0,
+    totalSources: officialSources.length
   });
 });
 
 app.post('/chat', async (req, res) => {
   try {
-    const { message, sessionId: incomingSessionId } = req.body;
+    const { message, sessionId } = req.body;
     if (!message) return res.status(400).json({ error: 'Message is required' });
-
-    // Stage 5: a session id ties messages/tickets/critic decisions together
-    // in SQLite. The client sends back whatever id we gave it last time; if
-    // it sends none (first message, or storage was cleared), a new one is
-    // minted and returned for it to reuse.
-    const sessionId = incomingSessionId || crypto.randomUUID();
-    insertSession.run(sessionId, new Date().toISOString());
-    insertMessage.run(sessionId, 'user', message, new Date().toISOString());
-
-    console.log('Processing question:', message, 'session:', sessionId);
-
-    // Stage 1: route before any retrieval. Null means the router itself
-    // failed (Groq error/bad JSON) — treat that like the old ungated flow.
-    const routerResult = await classifyIntent(message);
-    let intent = routerResult?.intent || null;
-    const routerConfidence = routerResult?.confidence ?? null;
-    console.log('Router intent:', intent, 'confidence:', routerConfidence);
-
-    // Stage 4: critic pre-check — a deterministic backstop independent of the
-    // router's LLM judgment. If it fires, it wins regardless of what the
-    // router decided.
-    let preCheckOverride = null;
-    const safetySignal = findSafetySignal(message);
-    if (safetySignal && intent !== 'urgent') {
-      preCheckOverride = `router classified as "${intent || 'unknown'}", but message matched safety-signal phrase "${safetySignal}" — critic overrode to urgent`;
-      console.log('Critic pre-check override:', preCheckOverride);
-      intent = 'urgent';
-    }
-
-    let botResponse, source, metadata, category, matchType;
-
-    if (intent === 'urgent') {
-      // Urgent-flag intents skip retrieval and generation entirely.
-      botResponse = URGENT_ESCALATION_MESSAGE;
-      source = 'router_escalation';
-      matchType = 'escalation';
-      category = null;
-      metadata = { intent, confidence: routerConfidence };
-      console.log('Router flagged urgent — skipping retrieval');
-    } else if (intent === 'out_of_scope') {
-      // Out-of-scope intents also skip FAQ retrieval; answer with general knowledge only.
-      botResponse = await generateWithGroq(message);
-      source = 'router_out_of_scope';
-      matchType = 'fallback';
-      category = null;
-      metadata = { intent, confidence: routerConfidence };
-      if (!botResponse) {
-        botResponse = getIntelligentResponse(message);
-        source = 'intelligent_response';
-      }
-      console.log('Router flagged out of scope — skipping FAQ retrieval');
-    } else {
-      // In-scope intent (or router failed and intent is null) — hand off to
-      // the retrieval agent.
-      const result = await retrievalAgent(message, intent);
-      botResponse = result.response;
-      source = result.source;
-      matchType = result.matchType;
-      category = result.category;
-      metadata = { ...result.metadata, confidence: routerConfidence };
-    }
-
-    // Stage 3: action agent — only runs for intents where a real incident
-    // (not just an FAQ lookup) might need a ticket, email, or escalation.
-    let actions = [];
-    if (ACTION_AGENT_INTENTS.includes(intent)) {
-      const actionResult = await actionAgent(message, intent, category, sessionId);
-      actions = actionResult.actionsTaken;
-      console.log('Action agent result:', actions.length ? actions : 'no action taken');
-    }
-
-    // Stage 4: critic review — runs before anything is sent, can annotate the
-    // response and force an escalation the action agent didn't make.
-    const critic = criticReview({ message, intent, routerConfidence, matchType, botResponse, actionsTaken: actions, preCheckOverride, sessionId });
-    botResponse = critic.response;
-    actions = critic.actionsTaken;
-    console.log('Critic flags:', critic.flags);
-
-    insertMessage.run(sessionId, 'bot', botResponse, new Date().toISOString());
-    const history = selectRecentMessages.all(sessionId, 10).reverse();
-    console.log('Sending response:', {
-      source,
-      category,
-      preview: botResponse.substring(0, 100) + '...',
-      metadata
-    });
-
-    res.json({
-      response: botResponse,
-      sessionId,
-      history,
-      actions,
-      criticFlags: critic.flags,
-      source,
-      category,
-      matchType,
-      intent,
-      routerConfidence,
-      metadata
-    });
+    res.json(await runPipeline({ message, sessionId }));
   } catch (error) {
     console.error('Error processing chat:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Scoped per session now — the old global array meant two concurrent
-// students would silently share one history.
-app.get('/history', (req, res) => {
-  const { sessionId } = req.query;
-  if (!sessionId) return res.status(400).json({ error: 'sessionId query param is required' });
-  const history = selectRecentMessages.all(sessionId, 100).reverse();
-  res.json({ history });
+// Same pipeline, streamed as newline-delimited JSON: session → step events as
+// each stage starts/finishes → answer tokens → a final "done" with the full
+// payload (which includes any critic edits to the streamed text).
+app.post('/chat/stream', async (req, res) => {
+  const { message, sessionId } = req.body || {};
+  if (!message) return res.status(400).json({ error: 'Message is required' });
+
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  const emit = event => {
+    if (!res.writableEnded) res.write(JSON.stringify(event) + '\n');
+  };
+
+  try {
+    const payload = await runPipeline({ message, sessionId, emit });
+    emit({ type: 'done', payload });
+  } catch (error) {
+    console.error('Error processing streamed chat:', error);
+    emit({ type: 'error', error: 'Internal server error' });
+  }
+  res.end();
 });
 
-app.delete('/history', (req, res) => {
+// A session's own conversation, oldest first. Session ids are random UUIDs
+// held only by that browser tab, so this doubles as its access check.
+app.get('/history', async (req, res) => {
+  const { sessionId } = req.query;
+  if (!sessionId) return res.status(400).json({ error: 'sessionId query param is required' });
+  res.json({ history: await recentMessages(sessionId, 100) });
+});
+
+app.delete('/history', async (req, res) => {
   const { sessionId } = req.body;
   if (!sessionId) return res.status(400).json({ error: 'sessionId is required' });
-  deleteSessionMessages.run(sessionId);
+  await db.run('DELETE FROM messages WHERE session_id = ?', [sessionId]);
   res.json({ message: 'Chat history cleared for session', sessionId });
 });
 
-// Inspect tickets created by the action agent — now backed by SQLite, so
-// these survive a server restart instead of resetting to [].
-app.get('/tickets', (req, res) => {
-  const rows = selectAllTickets.all().map(({ emails_json, ...ticket }) => ({
-    ...ticket,
-    escalated: !!ticket.escalated,
-    emails: JSON.parse(emails_json || '[]')
-  }));
-  res.json({ tickets: rows });
+// The student's own tickets (not everyone's), with any staff replies.
+app.get('/session/:sessionId/tickets', async (req, res) => {
+  const rows = await db.all('SELECT * FROM tickets WHERE session_id = ? ORDER BY created_at DESC', [req.params.sessionId]);
+  const tickets = [];
+  for (const row of rows) {
+    const replies = await db.all('SELECT id, author, content, created_at FROM ticket_replies WHERE ticket_id = ? ORDER BY id', [row.id]);
+    tickets.push(formatTicket(row, replies));
+  }
+  res.json({ tickets });
 });
 
-// Every critic decision, fired or not — the raw material for Stage 6's eval set.
-app.get('/critic-log', (req, res) => {
-  const rows = selectCriticLog.all(500).map(({ flags_json, ...row }) => ({
-    ...row,
-    flags: JSON.parse(flags_json)
-  }));
-  res.json({ criticLog: rows });
+// Staff replies newer than `after` (a message id), polled by the chat UI.
+app.get('/session/:sessionId/updates', async (req, res) => {
+  const after = Number(req.query.after) || 0;
+  const updates = await db.all(
+    "SELECT id, role, content, timestamp FROM messages WHERE session_id = ? AND role = 'staff' AND id > ? ORDER BY id",
+    [req.params.sessionId, after]
+  );
+  res.json({ updates });
+});
+
+// --- Lease Checker ---------------------------------------------------------
+
+const MAX_LEASE_CHARS = 120000;
+
+async function extractPdfText(base64) {
+  const { extractText, getDocumentProxy } = await import('unpdf');
+  const pdf = await getDocumentProxy(new Uint8Array(Buffer.from(base64, 'base64')));
+  const { text, totalPages } = await extractText(pdf, { mergePages: true });
+  return { text: text || '', pages: totalPages };
+}
+
+app.post('/lease/check', async (req, res) => {
+  try {
+    let { text, pdfBase64 } = req.body || {};
+    let pages = null;
+
+    if (pdfBase64) {
+      const extracted = await extractPdfText(pdfBase64);
+      text = extracted.text;
+      pages = extracted.pages;
+      if (text.replace(/\s/g, '').length < 50) {
+        return res.status(422).json({ error: 'That PDF has no selectable text (it may be a scan). Paste the lease text instead.' });
+      }
+    }
+    if (!text || text.trim().length < 50) return res.status(400).json({ error: 'Paste at least a few lines of the lease, or upload a PDF.' });
+
+    const truncated = text.length > MAX_LEASE_CHARS;
+    const result = await analyzeLease(text.slice(0, MAX_LEASE_CHARS), {
+      complete: process.env.GROQ_API_KEY ? completeJSON : null,
+      sourcesById
+    });
+    res.json({ ...result, pages, truncated, characters: Math.min(text.length, MAX_LEASE_CHARS) });
+  } catch (error) {
+    console.error('Lease check failed:', error);
+    res.status(500).json({ error: 'Could not analyze that lease.' });
+  }
+});
+
+// Hands a lease review to a person: opens a normal-priority ticket on the
+// student's session with the flagged clauses as its summary.
+app.post('/lease/escalate', async (req, res) => {
+  try {
+    const { sessionId: incoming, findings = [] } = req.body || {};
+    if (!Array.isArray(findings) || findings.length === 0) return res.status(400).json({ error: 'No findings to send.' });
+    const sessionId = incoming || crypto.randomUUID();
+    await db.run('INSERT OR IGNORE INTO sessions (id, created_at) VALUES (?, ?)', [sessionId, now()]);
+
+    const lines = findings.slice(0, 20).map(f => `• [${f.severity}] ${f.title} (clause ${f.clauseNumber}): "${String(f.quote || '').slice(0, 200)}"`);
+    const summary = `Lease review requested — ${findings.length} flagged clause(s).`;
+    const ticket = await createTicketRecord({ category: 'lease_review', summary, priority: 'normal' }, lines.join('\n'), 'housing', sessionId);
+    res.json({ sessionId, ...ticket });
+  } catch (error) {
+    console.error('Lease escalation failed:', error);
+    res.status(500).json({ error: 'Could not create the ticket.' });
+  }
+});
+
+// --- Listing Scam Checker --------------------------------------------------
+
+app.post('/listing/check', async (req, res) => {
+  try {
+    const { text } = req.body || {};
+    if (!text || text.trim().length < 30) return res.status(400).json({ error: 'Paste the listing or the landlord\'s message (at least a couple of sentences).' });
+    const result = await analyzeListing(text.slice(0, 20000), {
+      complete: process.env.GROQ_API_KEY ? completeJSON : null,
+      sourcesById
+    });
+    res.json(result);
+  } catch (error) {
+    console.error('Listing check failed:', error);
+    res.status(500).json({ error: 'Could not analyze that listing.' });
+  }
+});
+
+// --- Staff (human-in-the-loop) ---------------------------------------------
+
+const TICKET_STATUSES = ['open', 'escalated', 'in_progress', 'resolved'];
+
+app.get('/staff/tickets', requireStaff, async (req, res) => {
+  const rows = await db.all(`
+    SELECT t.*, (SELECT COUNT(*) FROM ticket_replies r WHERE r.ticket_id = t.id) AS reply_count
+    FROM tickets t
+    ORDER BY CASE WHEN t.status = 'resolved' THEN 1 ELSE 0 END, t.escalated DESC, t.created_at DESC
+  `);
+  res.json({ tickets: rows.map(r => formatTicket(r)) });
+});
+
+app.get('/staff/tickets/:id', requireStaff, async (req, res) => {
+  const row = await findTicket(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Ticket not found' });
+  const replies = await db.all('SELECT id, author, content, created_at FROM ticket_replies WHERE ticket_id = ? ORDER BY id', [row.id]);
+  const conversation = await recentMessages(row.session_id, 50);
+  const criticLog = (await db.all('SELECT * FROM critic_log WHERE session_id = ? ORDER BY id DESC LIMIT 20', [row.session_id]))
+    .map(({ flags_json, ...entry }) => ({ ...entry, flags: JSON.parse(flags_json) }));
+  res.json({ ticket: formatTicket(row, replies), conversation, criticLog });
+});
+
+app.post('/staff/tickets/:id/reply', requireStaff, async (req, res) => {
+  const content = String(req.body?.content || '').trim();
+  const author = String(req.body?.author || 'OCC staff').trim().slice(0, 60) || 'OCC staff';
+  if (!content) return res.status(400).json({ error: 'Reply text is required' });
+
+  const ticket = await findTicket(req.params.id);
+  if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+
+  await db.run('INSERT INTO ticket_replies (ticket_id, author, content, created_at) VALUES (?, ?, ?, ?)', [ticket.id, author, content, now()]);
+  // Mirrored into the student's conversation so their open chat picks it up.
+  await db.run('INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)', [ticket.session_id, 'staff', `**${author}** (re: ${ticket.id}): ${content}`, now()]);
+  if (ticket.status !== 'resolved') await db.run('UPDATE tickets SET status = ? WHERE id = ?', ['in_progress', ticket.id]);
+  res.json({ ok: true });
+});
+
+app.patch('/staff/tickets/:id', requireStaff, async (req, res) => {
+  const { status } = req.body || {};
+  if (!TICKET_STATUSES.includes(status)) return res.status(400).json({ error: `status must be one of ${TICKET_STATUSES.join(', ')}` });
+  const result = await db.run('UPDATE tickets SET status = ? WHERE id = ?', [status, req.params.id]);
+  if (!result.changes) return res.status(404).json({ error: 'Ticket not found' });
+  res.json({ ok: true, status });
+});
+
+// Every critic decision, fired or not — the raw material for the eval set.
+// Staff-only: rows contain students' raw messages.
+app.get('/staff/critic-log', requireStaff, async (req, res) => {
+  const rows = await db.all('SELECT * FROM critic_log ORDER BY id DESC LIMIT 500');
+  res.json({ criticLog: rows.map(({ flags_json, ...row }) => ({ ...row, flags: JSON.parse(flags_json) })) });
+});
+
+// Old public paths, now behind the staff token.
+app.get('/tickets', requireStaff, (_req, res) => res.redirect(307, '/staff/tickets'));
+app.get('/critic-log', requireStaff, (_req, res) => res.redirect(307, '/staff/critic-log'));
+
+app.use((error, req, res, next) => {
+  console.error('Unhandled route error:', error);
+  if (res.headersSent) return next(error);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 app.listen(PORT, () => {
