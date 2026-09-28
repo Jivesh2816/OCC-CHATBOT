@@ -19,16 +19,18 @@ backend/
 ├── lib/
 │   ├── llm.js              # Groq client + JSON-mode helper
 │   ├── knowledge.js        # FAQ + passage lookups, citation helpers
-│   ├── tickets.js          # ticket records and message history
+│   ├── tickets.js          # ticket records (validated, deduped, session-owned) and message history
+│   ├── crisis.js           # rule-based crisis detector + verified crisis resources
+│   ├── validate.js         # request validation (message length, session ids)
 │   ├── critic.js           # rule-based critic (pure — decides, pipeline acts)
 │   ├── lease.js            # Lease Checker rules + validated LLM pass
 │   ├── scam.js             # Listing Scam Check signals + validated LLM pass
-│   ├── bm25.js             # BM25 ranking over the official passages
+│   ├── bm25.js             # BM25 ranking over FAQs and official passages
 │   ├── alerts.js           # Slack/Discord webhook + email alerts on escalation
 │   ├── retention.js        # 90-day purge of messages, critic log, resolved tickets
 │   └── cite.js             # passage ids → source links
-├── faq.json                # 42 curated Q&A entries in 8 categories
-├── sources/official.json   # 125 verbatim passages from official pages (generated)
+├── faq.json                # 42 Q&A entries in 8 categories (no per-entry source; needs OCC review)
+├── sources/official.json   # 123 verbatim passages from official pages (generated)
 ├── scripts/build-sources.js
 ├── test/                   # node:test unit tests
 └── eval/                   # eval set + runner against the live /chat pipeline
@@ -47,20 +49,25 @@ frontend/src/
 
 1. **Memory.** The session's last 6 stored messages are loaded before the new one is saved.
 2. **Router** (`classifyIntent`). JSON-mode LLM call over 10 intents (`housing`, `health_safety`, `rent_money`, `food`, `transit`, `bylaws`, `academic`, `social`, `urgent`, `out_of_scope`) plus a confidence score, and an `incident` flag: whether the student describes a specific ongoing problem, as opposed to a general question. The last two turns are included as context. It makes two attempts (temperature 0, then 0.4); if both fail, the message goes to unscoped retrieval.
-3. **Critic pre-check** (`critic.preCheck`). If the student's message contains any of 25 crisis phrases, the intent becomes `urgent` regardless of the router.
+3. **Critic pre-check** (`critic.preCheck` → `lib/crisis.js`). A rule-based detector recognizes self-harm, sexual violence, violence or abuse, immediate danger, and losing housing, with vetoes for look-alikes ("suicide prevention workshop", "hit me with a rent increase"). The first four make the intent `urgent` regardless of the router — or when the router failed, which is what keeps crisis handling working during a model outage. Losing housing ("changed the locks", "nowhere to sleep tonight") keeps a normal intent so the student still gets an answer about their rights; the post-check adds resources and a ticket.
 4. **Retrieval and answer** (`retrievalAgent`).
-   - `urgent` returns fixed crisis resources.
+   - `urgent` returns fixed crisis resources chosen for the kind of crisis (e.g. Women's Crisis Services for abuse, 988 for self-harm), and only says staff were notified when an alert channel is configured.
    - `out_of_scope` gets a general answer with no retrieval.
-   - Otherwise: the top 3 FAQs are chosen by string scoring within the intent's category, and the top 3 official passages come from BM25 (housing and rent intents only, minimum score 6, with a small synonym map such as "fix" → repair/maintenance). Short follow-ups borrow the previous user message for the search.
-   - The answer is streamed and cites passages as `[n]`. The prompt forbids inventing form numbers, fees, phone numbers, or deadlines that aren't in the context.
-   - If Groq fails, it serves the top-ranked FAQ when the router scoped the search to a category; otherwise it tries a strict whole-question FAQ match, then a keyword reply.
-5. **Action agent** (`actionAgent`, intents `urgent` / `housing` / `health_safety` only, and only when the router marked the message an `incident`; urgent always runs). Skipping general questions saves the third model call on most messages, which matters under Groq's free-tier token budget. A missing flag counts as an incident, so a parsing slip can't silently drop a real problem. Function calling with three tools: `create_ticket`, `escalate_ticket`, and `draft_followup_email` (a mock Nodemailer transport). The loop runs at most 4 model turns, and each tool result is fed back so the model can chain (create → escalate).
+   - Otherwise: the top 3 FAQs come from BM25 within the intent's category (minimum score 5, so an unrelated question matches nothing instead of the closest-looking FAQ), and the top 3 official passages come from BM25 (housing and rent intents only, minimum score 6, with a small synonym map such as "fix" → repair/maintenance). Short follow-ups borrow the previous user message for the search.
+   - The answer is streamed (temperature 0.3) and cites passages as `[n]`. The prompt forbids stating form numbers, fees, prices, phone numbers, email or web addresses, deadlines, notice periods, percentages, or named businesses and distances that aren't in the context, and treats the student's message as a question, not instructions.
+   - If Groq fails, it serves an FAQ verbatim only on a clear match (minimum score 8); otherwise it says plainly that no answer could be generated, points to a relevant official site, and always lists 911, 988, and 211.
+5. **Action agent** (`actionAgent`, intents `urgent` / `housing` / `health_safety` only, and only when the router marked the message an `incident`; urgent always runs). Skipping general questions saves the third model call on most messages, which matters under Groq's free-tier token budget. A missing flag counts as an incident, so a parsing slip can't silently drop a real problem. Function calling with three tools: `create_ticket`, `escalate_ticket`, and `draft_followup_email`. The loop runs at most 4 model turns and 6 tool calls, and each tool result is fed back so the model can chain (create → escalate). Tool arguments are treated as untrusted:
+   - a ticket can only be escalated or drafted on from the conversation that owns it
+   - `create_ticket` reuses the conversation's open ticket instead of opening a duplicate, and only ever raises its priority
+   - `urgent` priority is downgraded to `high` unless the router or crisis detector judged the message urgent, so text in the message can't raise its own priority
+   - `draft_followup_email` takes an `office` from a fixed list, never an address, and saves a draft on the ticket for staff to review; nothing is sent
 6. **Critic post-check** (`critic.postCheck` + `applyCritic`):
    - flags low confidence (router < 0.5 or no knowledge-base match)
-   - groundedness: if the answer rests only on official passages (no FAQ matched) but cites none of them, flags `uncited` and appends a note telling the student to check the linked pages
+   - groundedness: if official passages were retrieved but the answer cites none of them, flags `uncited` and appends a note telling the student to check the linked pages
    - appends a legal disclaimer on 11 legal-advice phrases
    - force-escalates any `high`/`urgent` ticket the agent created but didn't escalate
-   - if the message is `urgent` and no ticket exists, opens one and escalates it
+   - for a housing emergency, appends resources (211, police non-emergency for lockouts, the Landlord and Tenant Board)
+   - if the message is `urgent` or a housing emergency and the agent opened no ticket, opens one (or reuses the conversation's open ticket) and escalates it
 
    Every decision is written to `critic_log`, fired or not.
 
@@ -109,9 +116,10 @@ Messages and critic decisions can contain crisis text, so they're deleted after 
 On Vercel, `trust proxy` is enabled so `req.ip` is the real client from `X-Forwarded-For`. It stays off locally, where that header could be spoofed. The counters live in memory, which on serverless means per instance, so this caps abuse rather than enforcing an exact global quota.
 
 The underlying constraint is Groq's free tier, shared by all users: **8,000 tokens per minute and 200,000 tokens per day** for `gpt-oss-120b`. A chat message costs 2–3 calls: router and answer, plus the action agent only when the router flags an incident. So the deployment serves only a few messages a minute, and a heavy day of testing can exhaust the daily budget; that happened once during development. When Groq returns 429, the app degrades rather than failing:
-- Retrieval serves an FAQ answer or a keyword reply, and the UI says the model was unavailable.
+- Retrieval serves a clearly matching FAQ answer, or says no answer could be generated (with crisis numbers), and the UI says the model was unavailable.
 - The Lease and Scam checkers fall back to their rule-based detectors.
-- Crisis handling doesn't depend on the model at all: the phrase pre-check and the critic still open and escalate a ticket.
+- Crisis handling doesn't depend on the model at all: the crisis detector still routes to crisis resources, and the critic still opens and escalates a ticket.
+- Calls time out after 20 seconds with one retry, so a stalled model call can't hang a request.
 
 Groq's paid Dev Tier removes these limits without code changes.
 
@@ -150,7 +158,7 @@ Results go to `eval/eval-results.json` (git-ignored). The README lists the lates
 | `POST /staff/tickets/:id/reply` · `PATCH /staff/tickets/:id` | staff token | Reply; change status |
 | `GET /staff/critic-log` | staff token | Last 500 critic decisions |
 
-"Session" routes are guarded only by the session id being an unguessable UUID held by that browser tab. Staff routes need `Authorization: Bearer $STAFF_TOKEN`; without `STAFF_TOKEN` set they return 503 rather than being open, because tickets and the critic log contain students' raw messages.
+"Session" routes are guarded only by the session id being an unguessable UUID held by that browser tab, so the server accepts only UUID-shaped ids (anything else starts a new session or gets a 400) and rate-limits these routes. Chat messages are capped at 2,000 characters; request bodies at 100 KB (6 MB for lease PDFs). Browser calls are allowed only from `CORS_ORIGINS`. Message text is not written to server logs. Staff routes need `Authorization: Bearer $STAFF_TOKEN`; without `STAFF_TOKEN` set they return 503 rather than being open, because tickets and the critic log contain students' raw messages.
 
 ## Design decisions
 
