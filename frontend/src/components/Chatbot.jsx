@@ -2,15 +2,16 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import gsap from 'gsap'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Plus, SendHorizontal, Sparkles, ListChecks, ArrowUpRight, Ticket, Home, Wallet, TrainFront, HeartPulse, ShoppingBasket, Users2, MessagesSquare, FileSearch, ScanSearch, UserRound, ExternalLink, BookOpen } from 'lucide-react'
+import { Plus, SendHorizontal, Sparkles, ListChecks, ArrowUpRight, Ticket, Home, Wallet, TrainFront, HeartPulse, ShoppingBasket, Users2, MessagesSquare, FileSearch, ScanSearch, UserRound, ExternalLink, BookOpen, LoaderCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetTrigger, SheetContent } from '@/components/ui/sheet'
 import VantaGlobe from '@/components/VantaGlobe'
 import AgentTrace, { stepsFromTrace } from '@/components/AgentTrace'
-import LeaseChecker from '@/components/LeaseChecker'
-import ScamChecker from '@/components/ScamChecker'
+// The two tools aren't on the first screen — load their code on first use.
+const LeaseChecker = React.lazy(() => import('@/components/LeaseChecker'))
+const ScamChecker = React.lazy(() => import('@/components/ScamChecker'))
 import { api, streamChat, normalizeCitations } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -419,10 +420,12 @@ const Chatbot = () => {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {mode === 'lease' && (
-          <LeaseChecker sessionId={sessionId} onSessionId={setSessionId} onTicketCreated={refreshTickets} />
-        )}
-        {mode === 'listing' && <ScamChecker />}
+        <React.Suspense fallback={<div className="flex justify-center py-16 text-muted-foreground"><LoaderCircle className="h-5 w-5 animate-spin" /></div>}>
+          {mode === 'lease' && (
+            <LeaseChecker sessionId={sessionId} onSessionId={setSessionId} onTicketCreated={refreshTickets} />
+          )}
+          {mode === 'listing' && <ScamChecker />}
+        </React.Suspense>
 
         {mode === 'chat' && isWelcome && (
           <div ref={welcomeRef} className="mx-auto flex min-h-full max-w-2xl flex-col items-center justify-center gap-7 px-5 py-6">
@@ -635,6 +638,8 @@ const Chatbot = () => {
           </form>
           <div className="mx-auto mt-2 max-w-2xl text-center text-[11px] leading-relaxed text-muted-foreground/70">
             General guidance only, not official advice — check anything urgent with WUSA or UW directly.
+            <br className="hidden sm:inline" />{' '}
+            Chats are kept up to 90 days so staff can follow up, then deleted. Don&rsquo;t share passwords or banking details.
           </div>
         </div>
       )}

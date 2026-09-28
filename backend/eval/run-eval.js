@@ -98,6 +98,7 @@ async function runChatCase(testCase) {
       criticFlags: data.criticFlags,
       citations: citations.map(c => `${c.id}${c.cited ? ' (cited)' : ''}`),
       memoryTurns: data.memoryTurns,
+      actionAgentRan: (data.trace || []).some(s => s.stage === 'action' && s.status === 'done'),
       actionsTaken: (data.actions || []).map(a => `${a.tool}${a.forcedByCritic ? ' [critic]' : ''}`)
     }
   };
@@ -134,7 +135,10 @@ async function runChatSuite() {
     citedOfficialSource: metric('citesSource', (c, r) => r.actual.citations.some(x => x.endsWith('(cited)'))),
     retrievedExpectedSource: metric('sourceAnyOf', (c, r) => r.actual.citations.some(x => c.expected.sourceAnyOf.includes(x.split(' ')[0]))),
     memoryFollowUps: `${cases.map((c, i) => [c, results[i]]).filter(([c, r]) => c.setup && r.pass).length}/${cases.filter(c => c.setup).length}`,
-    urgentEscalated: metric('escalatedTicket', (c, r) => r.actual.actionsTaken.some(a => a.startsWith('escalate_ticket')))
+    urgentEscalated: metric('escalatedTicket', (c, r) => r.actual.actionsTaken.some(a => a.startsWith('escalate_ticket'))),
+    // Model calls spent on the action agent: it's the third call per message,
+    // skipped when the router judges a housing/health message to be a general question.
+    actionAgentRuns: `${results.filter(r => r.actual?.actionAgentRan).length}/${results.length}`
   };
   return { summary, results };
 }

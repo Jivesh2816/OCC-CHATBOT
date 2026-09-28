@@ -65,3 +65,17 @@ Also replaced raw markdown text — bot answers were dumping literal `**bold**`,
 **Not tuned away:** two ambiguous intent labels, and one banking-info scam listing scored medium, not high. Changing weights until an 8-case set passes would be overfitting; the README reports them as failures.
 
 **Escaping trap, for next time:** patching files through `node -e "…"` or unquoted heredocs silently turned `\b` into backspace bytes and `\n` into real newlines inside regexes and strings, three times this session. Anything with backslashes goes through the Edit tool or a quoted heredoc (`<<'EOF'`), and a control-character scan over the tracked files now comes back clean.
+
+## 2026-09-28 (evening) — server.js split, token budget, groundedness, retention, CI, bundle size
+
+**Split `server.js` (≈1,150 lines → 50) by slicing, not rewriting.** A script copied exact line ranges into `pipeline/`, `routes/`, `middleware/`, and `lib/`, then ESLint's `no-undef` / `no-unused-vars` confirmed every moved function still imports what it uses. The checker itself was verified first with a planted undefined variable. Retyping a thousand lines by hand is how subtle drift gets in.
+
+**Groq's free tier also caps tokens per *day* (200k), not just per minute.** A second eval run hit it mid-way, so almost every model call 429'd. The run became an accidental resilience test: no 500s, urgent messages still escalated 3/3, rule-based checks unaffected. It also caught a regression I'd introduced. The "serve the top-ranked FAQ when Groq fails" fallback served weak word-overlap matches verbatim when the router had also failed ("weather on Mars" → an FAQ answer). Now the ranked FAQ is trusted only when the router scoped the search to a category.
+
+**Cutting model calls instead of only rate-limiting them.** The router now also returns `incident` (a specific ongoing problem vs. a general question) in the same JSON call. The action agent, the third call, runs only for incidents, and always for urgent messages. A missing flag defaults to "incident", because wrongly skipping could drop a real problem while wrongly running only costs a call. The token savings haven't been measured yet because the daily quota was exhausted; the eval now records `actionAgentRuns` for the next run.
+
+**Groundedness rule.** An answer backed only by official passages (no FAQ) that cites none of them now gets an `uncited` flag and a visible note. FAQ-backed answers are exempt, since FAQs carry no citation numbers.
+
+**Retention on serverless.** There's no cron process, so the 90-day purge runs on incoming requests, at most once every 6 hours per instance. Unresolved tickets are never purged. It's tested against an in-memory SQLite database (`SQLITE_PATH=:memory:`).
+
+**Bundle: 1,294 KB → 520 KB main chunk.** three.js and Vanta (the decorative globe) now load after first paint via dynamic `import()`; the checkers and staff dashboard are `React.lazy`. Checked in a production build, not the dev server, by watching which script requests fire in the browser.
