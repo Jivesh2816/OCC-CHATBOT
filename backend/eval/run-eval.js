@@ -9,6 +9,9 @@ const fs = require('fs');
 // agent calls) is logged for manual review instead of hard-asserted.
 const BASE_URL = process.env.EVAL_BASE_URL || 'http://localhost:5000';
 const DELAY_MS = 300; // be polite to Groq's rate limits between cases
+// Sessions now carry multi-turn memory, so each run gets fresh session ids —
+// otherwise a case would see its own answer from the previous run as context.
+const RUN_ID = Date.now().toString(36);
 
 const EVAL_SET_PATH = path.join(__dirname, 'eval-set.json');
 const RESULTS_PATH = path.join(__dirname, 'eval-results.json');
@@ -30,7 +33,7 @@ function checkCriticFlags(expectedFlags, actualFlags) {
 
 async function runCase(testCase) {
   const { id, message, expected = {} } = testCase;
-  const sessionId = `eval-${id}`;
+  const sessionId = `eval-${id}-${RUN_ID}`;
 
   const res = await fetch(`${BASE_URL}/chat`, {
     method: 'POST',
