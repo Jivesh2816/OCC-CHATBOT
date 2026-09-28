@@ -21,7 +21,7 @@ const base = { intent: 'housing', routerConfidence: 0.9, matchType: 'faq', botRe
 
 test('post-check raises no flags on a confident, grounded answer', () => {
   const result = postCheck(base);
-  assert.deepEqual(result.flags, { safetyOverride: false, lowConfidence: false, policySensitive: false, escalationOverride: false });
+  assert.deepEqual(result.flags, { safetyOverride: false, lowConfidence: false, policySensitive: false, escalationOverride: false, uncited: false });
   assert.equal(result.response, base.botResponse);
   assert.deepEqual(result.escalate, []);
   assert.equal(result.createUrgent, false);
@@ -73,4 +73,25 @@ test('post-check does not open a duplicate when an urgent ticket already exists'
   const result = postCheck({ ...base, intent: 'urgent', actionsTaken });
   assert.equal(result.createUrgent, false);
   assert.equal(result.flags.escalationOverride, false);
+});
+
+const passages = cited => [
+  { n: 1, id: 'know-your-rights-5', cited },
+  { n: 2, id: 'guide-ontarios-standard-lease-20', cited: false }
+];
+
+test('flags an official-only answer that cites none of its passages, and says so', () => {
+  const result = postCheck({ ...base, matchType: 'official', citations: passages(false) });
+  assert.equal(result.flags.uncited, true);
+  assert.match(result.response, /couldn't tie this answer to a specific official source/);
+});
+
+test('does not flag an official answer that cites a passage', () => {
+  const result = postCheck({ ...base, matchType: 'official', citations: passages(true) });
+  assert.equal(result.flags.uncited, false);
+  assert.equal(result.response, base.botResponse);
+});
+
+test('FAQ-backed answers are not held to the citation rule', () => {
+  assert.equal(postCheck({ ...base, matchType: 'faq', citations: passages(false) }).flags.uncited, false);
 });

@@ -6,14 +6,26 @@ An Express API (`backend/`) and a React + Vite frontend (`frontend/`), deployed 
 
 ```
 backend/
-├── server.js               # pipeline, Groq calls, all routes
+├── server.js               # app setup: middleware, route mounting, error handler (~50 lines)
 ├── db.js                   # async SQLite adapter: node:sqlite file, or Turso/libSQL over HTTP
+├── pipeline/               # the agent stages, in order
+│   ├── index.js            # runPipeline(): memory → router → pre-check → retrieval → action → critic
+│   ├── memory.js           # recent turns as chat history / context text
+│   ├── router.js           # intent + confidence + incident, JSON mode
+│   ├── retrieval.js        # FAQ + official-passage retrieval, streamed grounded answer, fallbacks
+│   └── action.js           # function-calling tool loop (create / escalate / draft email)
+├── routes/                 # HTTP surface: chat, session, tools (lease/listing), staff
+├── middleware/             # staff token auth, per-IP rate limits
 ├── lib/
-│   ├── critic.js           # rule-based critic (pure — decides, server.js acts)
+│   ├── llm.js              # Groq client + JSON-mode helper
+│   ├── knowledge.js        # FAQ + passage lookups, citation helpers
+│   ├── tickets.js          # ticket records and message history
+│   ├── critic.js           # rule-based critic (pure — decides, pipeline acts)
 │   ├── lease.js            # Lease Checker rules + validated LLM pass
 │   ├── scam.js             # Listing Scam Check signals + validated LLM pass
 │   ├── bm25.js             # BM25 ranking over the official passages
 │   ├── alerts.js           # Slack/Discord webhook + email alerts on escalation
+│   ├── retention.js        # 90-day purge of messages, critic log, resolved tickets
 │   └── cite.js             # passage ids → source links
 ├── faq.json                # 42 curated Q&A entries in 8 categories
 ├── sources/official.json   # 125 verbatim passages from official pages (generated)
@@ -31,20 +43,21 @@ frontend/src/
 
 ## The chat pipeline
 
-`runPipeline()` in `server.js` serves both `POST /chat` (JSON) and `POST /chat/stream` (NDJSON). It's one code path, so the eval exercises exactly what users get.
+`runPipeline()` in `pipeline/index.js` serves both `POST /chat` (JSON) and `POST /chat/stream` (NDJSON). It's one code path, so the eval exercises exactly what users get.
 
 1. **Memory.** The session's last 6 stored messages are loaded before the new one is saved.
-2. **Router** (`classifyIntent`). JSON-mode LLM call over 10 intents (`housing`, `health_safety`, `rent_money`, `food`, `transit`, `bylaws`, `academic`, `social`, `urgent`, `out_of_scope`) plus a confidence score. The last two turns are included as context. It makes two attempts (temperature 0, then 0.4); if both fail, the message goes to unscoped retrieval.
+2. **Router** (`classifyIntent`). JSON-mode LLM call over 10 intents (`housing`, `health_safety`, `rent_money`, `food`, `transit`, `bylaws`, `academic`, `social`, `urgent`, `out_of_scope`) plus a confidence score, and an `incident` flag: whether the student describes a specific ongoing problem, as opposed to a general question. The last two turns are included as context. It makes two attempts (temperature 0, then 0.4); if both fail, the message goes to unscoped retrieval.
 3. **Critic pre-check** (`critic.preCheck`). If the student's message contains any of 25 crisis phrases, the intent becomes `urgent` regardless of the router.
 4. **Retrieval and answer** (`retrievalAgent`).
    - `urgent` returns fixed crisis resources.
    - `out_of_scope` gets a general answer with no retrieval.
    - Otherwise: the top 3 FAQs are chosen by string scoring within the intent's category, and the top 3 official passages come from BM25 (housing and rent intents only, minimum score 6, with a small synonym map such as "fix" → repair/maintenance). Short follow-ups borrow the previous user message for the search.
    - The answer is streamed and cites passages as `[n]`. The prompt forbids inventing form numbers, fees, phone numbers, or deadlines that aren't in the context.
-   - If Groq fails, it falls back to a direct FAQ match, then a keyword reply.
-5. **Action agent** (`actionAgent`, intents `urgent` / `housing` / `health_safety` only). Function calling with three tools: `create_ticket`, `escalate_ticket`, and `draft_followup_email` (a mock Nodemailer transport). The loop runs at most 4 model turns, and each tool result is fed back so the model can chain (create → escalate).
+   - If Groq fails, it serves the top-ranked FAQ when the router scoped the search to a category; otherwise it tries a strict whole-question FAQ match, then a keyword reply.
+5. **Action agent** (`actionAgent`, intents `urgent` / `housing` / `health_safety` only, and only when the router marked the message an `incident`; urgent always runs). Skipping general questions saves the third model call on most messages, which matters under Groq's free-tier token budget. A missing flag counts as an incident, so a parsing slip can't silently drop a real problem. Function calling with three tools: `create_ticket`, `escalate_ticket`, and `draft_followup_email` (a mock Nodemailer transport). The loop runs at most 4 model turns, and each tool result is fed back so the model can chain (create → escalate).
 6. **Critic post-check** (`critic.postCheck` + `applyCritic`):
    - flags low confidence (router < 0.5 or no knowledge-base match)
+   - groundedness: if the answer rests only on official passages (no FAQ matched) but cites none of them, flags `uncited` and appends a note telling the student to check the linked pages
    - appends a legal disclaimer on 11 legal-advice phrases
    - force-escalates any `high`/`urgent` ticket the agent created but didn't escalate
    - if the message is `urgent` and no ticket exists, opens one and escalates it
@@ -79,6 +92,10 @@ When a ticket is escalated for the first time, by the action agent or the critic
 - **Timing:** alerts are awaited, with a 4-second timeout, before the response is sent. Serverless functions can be frozen once they respond, so fire-and-forget could silently drop an alert. A failed channel is logged and never breaks the chat.
 - **Crisis reply wording:** the reply promises that the support team has been notified only when at least one alert channel is configured. Otherwise it points only to the phone lines.
 
+## Data retention (`lib/retention.js`)
+
+Messages and critic decisions can contain crisis text, so they're deleted after `RETENTION_DAYS` (default 90). Resolved tickets older than the window are deleted along with their replies. Unresolved tickets are never purged, because a person still has to act on them. Serverless has no always-on process for a cron job, so the purge runs on incoming requests, at most once every 6 hours per instance. The deletes are idempotent, so overlapping runs are harmless. The chat footer tells students about the 90-day window.
+
 ## Rate limits
 
 `express-rate-limit`, per client IP, on everything that calls the model. The defaults are env-tunable:
@@ -91,7 +108,12 @@ When a ticket is escalated for the first time, by the action agent or the critic
 
 On Vercel, `trust proxy` is enabled so `req.ip` is the real client from `X-Forwarded-For`. It stays off locally, where that header could be spoofed. The counters live in memory, which on serverless means per instance, so this caps abuse rather than enforcing an exact global quota.
 
-The underlying constraint is Groq's free tier: **8,000 tokens per minute** for `gpt-oss-20b`, shared by all users. A chat message costs about 3 calls (router, answer, and action agent), so the deployment realistically serves only a few messages per minute in total. When Groq returns 429, retrieval falls back to the best-ranked FAQ answer and the UI says the model was unavailable.
+The underlying constraint is Groq's free tier, shared by all users: **8,000 tokens per minute and 200,000 tokens per day** for `gpt-oss-20b`. A chat message costs 2–3 calls: router and answer, plus the action agent only when the router flags an incident. So the deployment serves only a few messages a minute, and a heavy day of testing can exhaust the daily budget; that happened once during development. When Groq returns 429, the app degrades rather than failing:
+- Retrieval serves an FAQ answer or a keyword reply, and the UI says the model was unavailable.
+- The Lease and Scam checkers fall back to their rule-based detectors.
+- Crisis handling doesn't depend on the model at all: the phrase pre-check and the critic still open and escalate a ticket.
+
+Groq's paid Dev Tier removes these limits without code changes.
 
 ## Evaluation (`eval/`)
 

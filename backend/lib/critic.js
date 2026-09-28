@@ -20,7 +20,9 @@ const LEGAL_ADVICE_PHRASES = [
   'landlord and tenant board', 'ltb hearing', 'take legal action', 'breach of contract'
 ];
 
-const LEGAL_DISCLAIMER = `\n\n_Note: This is general information, not legal advice. For landlord-tenant disputes, contact Waterloo Region Community Legal Services or the Landlord and Tenant Board directly._`;
+const UNCITED_NOTE = `\n\n_I couldn't tie this answer to a specific official source — please check the related official pages below before relying on it._`;
+
+const LEGAL_DISCLAIMER =`\n\n_Note: This is general information, not legal advice. For landlord-tenant disputes, contact Waterloo Region Community Legal Services or the Landlord and Tenant Board directly._`;
 
 function findPhrase(text, phrases) {
   const lower = (text || '').toLowerCase();
@@ -50,12 +52,13 @@ function preCheck(message, routerIntent) {
 //   escalate:     ticket ids the action agent created at high/urgent but left unescalated
 //   createUrgent: true when the message is urgent and no ticket exists at all —
 //                 a crisis must always reach a human, even if the model declined to act
-function postCheck({ intent, routerConfidence, matchType, botResponse, actionsTaken, preCheckOverride }) {
+function postCheck({ intent, routerConfidence, matchType, botResponse, actionsTaken, preCheckOverride, citations = [] }) {
   const flags = {
     safetyOverride: !!preCheckOverride,
     lowConfidence: false,
     policySensitive: false,
-    escalationOverride: false
+    escalationOverride: false,
+    uncited: false
   };
   const reasons = [];
   if (preCheckOverride) reasons.push(preCheckOverride);
@@ -65,6 +68,17 @@ function postCheck({ intent, routerConfidence, matchType, botResponse, actionsTa
   if (matchType === 'fallback' || (routerConfidence !== null && routerConfidence !== undefined && routerConfidence < 0.5)) {
     flags.lowConfidence = true;
     reasons.push(`no confident knowledge-base backing (matchType=${matchType}, routerConfidence=${routerConfidence})`);
+  }
+
+  // Groundedness: an answer whose only backing is official passages (no FAQ
+  // matched) should cite at least one of them. If it cites none, the model
+  // answered from its own knowledge while sources sat unused — say so rather
+  // than let it read as sourced. FAQ-backed answers aren't held to this: FAQs
+  // are the grounding, and they carry no citation numbers.
+  if (matchType === 'official' && citations.length > 0 && !citations.some(c => c.cited)) {
+    flags.uncited = true;
+    reasons.push(`answer cited none of the ${citations.length} official passages it was given`);
+    response += UNCITED_NOTE;
   }
 
   const legalPhrase = findPolicySensitivePhrase(response);

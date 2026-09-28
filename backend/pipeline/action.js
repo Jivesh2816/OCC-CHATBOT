@@ -1,0 +1,140 @@
+// Stage 3: Action agent tools. Each one is a real side effect, not text —
+// the model decides whether/which to call via function calling below.
+const { groq, MODEL } = require('../lib/llm');
+const { historyAsText } = require('./memory');
+const { createTicketRecord, draftFollowupEmailRecord, escalateTicketRecord } = require('../lib/tickets');
+
+// Explicit function-calling schemas — the model can only take these three
+// actions, with these exact argument shapes. No free-text "do something" path.
+const ACTION_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'create_ticket',
+      description: 'Create a follow-up ticket for a genuine unresolved issue that needs human attention, e.g. a landlord dispute or safety concern. Do not use for general informational questions.',
+      parameters: {
+        type: 'object',
+        properties: {
+          category: { type: 'string', description: 'Short category label, e.g. landlord_dispute, safety_concern, maintenance, harassment' },
+          summary: { type: 'string', description: 'One or two sentence summary of the issue' },
+          priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] }
+        },
+        required: ['category', 'summary', 'priority']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'draft_followup_email',
+      description: 'Draft a follow-up email about an existing ticket to a relevant campus support contact. Sent through a mock transport — use the ticketId returned by create_ticket.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ticketId: { type: 'string' },
+          to: { type: 'string', description: 'Recipient email address, e.g. a campus office contact' },
+          subject: { type: 'string' },
+          body: { type: 'string' }
+        },
+        required: ['ticketId', 'to', 'subject', 'body']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'escalate_ticket',
+      description: 'Mark an existing ticket for human escalation because it needs a person, not the chatbot, to act on it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ticketId: { type: 'string' },
+          reason: { type: 'string' }
+        },
+        required: ['ticketId', 'reason']
+      }
+    }
+  }
+];
+
+const ACTION_SYSTEM_PROMPT = `You are an action-taking agent for a University of Waterloo off-campus student support system. You have three tools: create_ticket, draft_followup_email, escalate_ticket.
+
+Only take action if the student's message describes a genuine, unresolved issue a human should follow up on — e.g. an ongoing landlord dispute, an unaddressed safety concern, harassment, or a crisis. Do NOT create a ticket for a general informational question (e.g. "what's a normal notice period", "where do I report a bylaw issue") — those are already answered by the FAQ system; only act on a specific incident.
+
+If action is warranted: call create_ticket first. Use escalate_ticket if the issue needs a human to see it soon (urgent/high priority, safety-related). Only call draft_followup_email if a message to a campus office would concretely help this specific student, and only after create_ticket has returned a ticketId.
+
+If no action is warranted, call no tools at all.`;
+
+// Runs a bounded function-calling loop: the model decides which tools (if
+// any) to call, we execute the real side effect, and feed the result back so
+// it can decide the next step (e.g. escalate only after seeing the ticket id).
+async function actionAgent(message, intent, category, sessionId, history = []) {
+  const context = historyAsText(history, 4);
+  const messages = [
+    { role: 'system', content: ACTION_SYSTEM_PROMPT },
+    { role: 'user', content: `${context ? `Earlier conversation (context only):\n${context}\n\n` : ''}Student message: "${message}"\nClassified intent: ${intent}\nFAQ category: ${category || 'none'}` }
+  ];
+
+  const actionsTaken = [];
+  const MAX_STEPS = 4;
+
+  try {
+    for (let step = 0; step < MAX_STEPS; step++) {
+      const completion = await groq.chat.completions.create({
+        messages,
+        model: MODEL,
+        temperature: 0,
+        tools: ACTION_TOOLS,
+        tool_choice: 'auto',
+        max_tokens: 512
+      });
+
+      const assistantMessage = completion.choices[0]?.message;
+      if (!assistantMessage) break;
+      messages.push(assistantMessage);
+
+      const toolCalls = assistantMessage.tool_calls;
+      if (!toolCalls || toolCalls.length === 0) {
+        return { actionsTaken, summary: assistantMessage.content || null };
+      }
+
+      for (const toolCall of toolCalls) {
+        let args = {};
+        try {
+          args = JSON.parse(toolCall.function.arguments || '{}');
+        } catch (parseError) {
+          console.error('Action agent: bad tool arguments JSON:', parseError.message);
+        }
+
+        let result;
+        try {
+          if (toolCall.function.name === 'create_ticket') {
+            result = await createTicketRecord(args, message, intent, sessionId);
+          } else if (toolCall.function.name === 'draft_followup_email') {
+            result = await draftFollowupEmailRecord(args);
+          } else if (toolCall.function.name === 'escalate_ticket') {
+            result = await escalateTicketRecord(args);
+          } else {
+            result = { error: `Unknown tool: ${toolCall.function.name}` };
+          }
+        } catch (toolError) {
+          result = { error: toolError.message };
+        }
+
+        actionsTaken.push({ tool: toolCall.function.name, args, result });
+        messages.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify(result) });
+      }
+    }
+
+    return { actionsTaken, summary: 'Action agent reached its step limit.' };
+  } catch (error) {
+    console.error('Action agent failed:', error?.message || error);
+    return { actionsTaken, summary: null, error: 'action_agent_failed' };
+  }
+}
+
+// Only these intents can trigger the action agent — everything else is a
+// plain FAQ lookup with nothing for a human to follow up on.
+const ACTION_AGENT_INTENTS = ['urgent', 'housing', 'health_safety'];
+
+module.exports = { ACTION_TOOLS, ACTION_AGENT_INTENTS, actionAgent };

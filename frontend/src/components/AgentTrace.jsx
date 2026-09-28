@@ -15,7 +15,8 @@ const FLAG_LABELS = {
   safetyOverride: 'safety override',
   lowConfidence: 'low confidence',
   policySensitive: 'legal disclaimer added',
-  escalationOverride: 'forced escalation'
+  escalationOverride: 'forced escalation',
+  uncited: 'no citation — caution note added'
 }
 
 function describe(step) {
@@ -25,7 +26,11 @@ function describe(step) {
   switch (step.stage) {
     case 'router':
       if (!step.intent) return 'classification failed — answered without routing'
-      return `${step.intent.replace(/_/g, ' ')} · ${Math.round((step.confidence ?? 0) * 100)}% confident${step.usedMemory ? ' · used earlier turns' : ''}`
+      return [
+        `${step.intent.replace(/_/g, ' ')} · ${Math.round((step.confidence ?? 0) * 100)}% confident`,
+        step.incident === true ? 'specific incident' : step.incident === false ? 'general question' : null,
+        step.usedMemory ? 'used earlier turns' : null
+      ].filter(Boolean).join(' · ')
     case 'critic_pre':
       return step.override ? 'safety phrase matched → forced to urgent' : 'no safety phrases found'
     case 'retrieval': {

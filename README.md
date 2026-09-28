@@ -4,7 +4,7 @@ An AI assistant for University of Waterloo students living off campus. It answer
 
 **Live demo:** https://occ-chatbot-36q6.vercel.app/ · **Backend API:** [occ-chatbot.vercel.app](https://occ-chatbot.vercel.app)
 
-![Node](https://img.shields.io/badge/Node_22-Express-000?logo=node.js&logoColor=white) ![React](https://img.shields.io/badge/React_18-Vite-149eca?logo=react&logoColor=white) ![Groq](https://img.shields.io/badge/Groq-GPT--OSS_20B-orange) ![SQLite](https://img.shields.io/badge/SQLite-Turso%2FlibSQL-003B57?logo=sqlite&logoColor=white) ![Vercel](https://img.shields.io/badge/Deploy-Vercel-black?logo=vercel&logoColor=white)
+[![CI](https://github.com/Jivesh2816/OCC-CHATBOT/actions/workflows/ci.yml/badge.svg)](https://github.com/Jivesh2816/OCC-CHATBOT/actions/workflows/ci.yml) ![Node](https://img.shields.io/badge/Node_22-Express-000?logo=node.js&logoColor=white) ![React](https://img.shields.io/badge/React_18-Vite-149eca?logo=react&logoColor=white) ![Groq](https://img.shields.io/badge/Groq-GPT--OSS_20B-orange) ![SQLite](https://img.shields.io/badge/SQLite-Turso%2FlibSQL-003B57?logo=sqlite&logoColor=white) ![Vercel](https://img.shields.io/badge/Deploy-Vercel-black?logo=vercel&logoColor=white)
 
 | Answer with cited sources + live agent trace | Lease Checker |
 |---|---|
@@ -23,13 +23,14 @@ An AI assistant for University of Waterloo students living off campus. It answer
 - **Listing Scam Check.** Scores a rental ad against UW Special Constable Service's rental-fraud warning signs and UW's published rent estimates. The model must quote the listing verbatim or its signal is dropped, and the risk level is computed from the validated signals, not by the model.
 - **Human in the loop.** The action agent can open, escalate, and draft follow-ups on tickets through function calling. Every escalation alerts staff by Slack/Discord webhook or email (ticket metadata only, never the student's words). Staff work tickets from a token-protected queue (`/#/staff`), and their replies appear in the student's chat.
 - **Abuse protection.** Per-IP rate limits on the endpoints that call the model, so one person can't exhaust the Groq quota and take the demo down for everyone.
-- **Rule-based critic.** A deterministic safety net: it overrides the router on crisis phrases, adds a legal disclaimer to legal-advice phrasing, force-escalates high-priority tickets the agent left unescalated, and opens a ticket for any urgent message the agent didn't act on. Every decision is logged.
+- **Rule-based critic.** A deterministic safety net: it overrides the router on crisis phrases, adds a legal disclaimer to legal-advice phrasing, notes when an answer cites none of the official sources it was given, force-escalates high-priority tickets the agent left unescalated, and opens a ticket for any urgent message the agent didn't act on. Every decision is logged.
+- **Privacy by default.** Messages and critic logs are deleted after 90 days (unresolved tickets are kept until handled), staff alerts never contain student text, and the UI says so.
 
 ## How it works
 
 ```mermaid
 flowchart TD
-    U[Student message + recent turns] --> R[Router · LLM JSON mode<br/>10 intents + confidence]
+    U[Student message + recent turns] --> R[Router · LLM JSON mode<br/>10 intents + confidence + incident?]
     R --> P{Critic pre-check<br/>crisis phrases}
     P -->|match| X[Forced to urgent]
     P -->|no match| I{Intent}
@@ -38,11 +39,11 @@ flowchart TD
     I -->|out of scope| G1[General answer, no retrieval]
     I -->|in scope| RT[Retrieval<br/>FAQ scoring + BM25 over 125 official passages]
     RT --> G2[Groq GPT-OSS 20B<br/>streamed, cites passages]
-    E & G2 --> A{Housing / health / urgent?}
+    E & G2 --> A{Urgent, or a housing / health incident?}
     G1 --> C
     A -->|yes| AG[Action agent · function calling<br/>create_ticket · escalate_ticket · draft_followup_email<br/>max 4 steps]
     A -->|no| C
-    AG --> C[Critic post-check<br/>disclaimer · forced escalation · urgent ticket]
+    AG --> C[Critic post-check<br/>disclaimer · citation check · forced escalation · urgent ticket]
     C --> DB[(SQLite / Turso<br/>messages · tickets · critic_log · replies)]
     DB --> S[Staff queue] -->|reply| U
 ```
@@ -55,7 +56,7 @@ More detail, including the API, data model, and design decisions: [HOW_IT_WORKS.
 
 **Frontend:** React 18 · Vite · Tailwind CSS v4 · Radix primitives · GSAP · Vanta.js · react-markdown.
 
-**Quality:** 38 unit tests (`node:test`) covering the critic, lease rules, scam signals, retrieval ranking, and staff alerts · a 55-case eval harness that runs against the live HTTP API.
+**Quality:** 44 unit tests (`node:test`) covering the critic, lease rules, scam signals, retrieval ranking, staff alerts, and data retention, run by GitHub Actions on every push along with the frontend build · a 55-case eval harness that runs against the live HTTP API.
 
 ## Evaluation
 
@@ -75,6 +76,8 @@ More detail, including the API, data model, and design decisions: [HOW_IT_WORKS.
 
 Read these as a regression suite, not a benchmark: the sets are small and hand-written, and the model isn't deterministic. An earlier run the same day scored the lease suite 92% / 92% after the model flagged a snow-removal clause as a landlord repair. What's left failing is shown, not tuned away. Two intent labels are genuinely ambiguous (splitting utilities with roommates: `housing` or `rent_money`?), and one scam listing that asks for banking details before a viewing scores medium where a person would probably say high.
 
+These results predate two later changes: the router's `incident` flag, which skips the action agent for general questions, and a stricter FAQ fallback. A re-run was blocked when the day's Groq token quota ran out. That blocked run did show how the app behaves with the model unavailable: no errors, 3/3 urgent messages still escalated to a person (the crisis check and critic don't use the model), the scam check still scored 7/8, and the lease rules alone still caught 62% of planted clauses.
+
 ## Running locally
 
 ```bash
@@ -91,6 +94,7 @@ cd frontend && npm install && npm run dev     # http://localhost:3000 (proxies /
 | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | for hosted persistence | Without them, data lives in a local SQLite file (on Vercel, in `/tmp`, which resets). |
 | `STAFF_ALERT_WEBHOOK_URL` | recommended | Slack or Discord webhook pinged on every escalation. Without it (or SMTP below), the crisis reply doesn't promise human follow-up. |
 | `SMTP_URL`, `STAFF_ALERT_EMAIL` | optional | Email alerts on escalation instead of, or as well as, the webhook. |
+| `RETENTION_DAYS` | optional | How long messages and critic logs are kept (default 90). |
 | `RATE_LIMIT_*` | optional | Per-IP limits (defaults: 12 chats/min and 100/hour; 5 lease/listing checks/min and 30/hour). |
 
 ```bash
