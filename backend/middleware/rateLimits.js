@@ -31,7 +31,10 @@ const toolLimits = [
   limiter(MINUTE, envInt('RATE_LIMIT_TOOLS_PER_MIN', 5), 'Too many checks in a row — give it a minute and try again.'),
   limiter(HOUR, envInt('RATE_LIMIT_TOOLS_PER_HOUR', 30), "You've hit this hour's limit for lease and listing checks.")
 ];
+// Session reads and history deletes. The chat UI polls for staff replies
+// every 8 seconds, well under this.
+const sessionLimit = limiter(MINUTE, envInt('RATE_LIMIT_SESSION_PER_MIN', 60), 'Too many requests — slow down.');
 // Slows brute-forcing the shared staff token.
 const staffLimit = limiter(MINUTE, envInt('RATE_LIMIT_STAFF_PER_MIN', 60), 'Too many staff requests — slow down.');
 
-module.exports = { chatLimits, toolLimits, staffLimit };
+module.exports = { chatLimits, toolLimits, sessionLimit, staffLimit };

@@ -90,7 +90,7 @@ function Citations({ citations }) {
   )
 }
 
-function ActivityPanel({ tickets, totalFAQs, totalSources }) {
+function ActivityPanel({ tickets, totalFAQs, totalSources, staffHandoff }) {
   return (
     <div className="flex h-full flex-col gap-5 p-5">
       <div className="flex items-center gap-2 text-[15px] font-semibold">
@@ -99,7 +99,9 @@ function ActivityPanel({ tickets, totalFAQs, totalSources }) {
       </div>
       {tickets.length === 0 && (
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          No tickets yet — a housing or safety issue that needs real follow-up creates one here, and a staff reply shows up right in your chat.
+          {staffHandoff
+            ? 'No tickets yet — a housing or safety issue that needs real follow-up creates one here, and staff are notified. Any reply shows up right in your chat.'
+            : 'No tickets yet. Serious issues are logged here, but staff follow-up isn’t set up yet — for help with a housing problem, contact UW Off-Campus Housing or WUSA directly.'}
         </p>
       )}
       {tickets.length > 0 && (
@@ -123,14 +125,28 @@ function ActivityPanel({ tickets, totalFAQs, totalSources }) {
         </div>
       )}
       <div className="mt-auto flex flex-col gap-2 border-t border-border pt-4 text-[12px] leading-relaxed text-muted-foreground">
-        <p>Answers draw from a {totalFAQs}-entry FAQ set and {totalSources} passages from official UW and Ontario pages. For anything binding, check with WUSA or the UW Off-Campus Housing Office.</p>
+        <p>Answers are AI-generated from a {totalFAQs}-entry FAQ set and {totalSources} passages from official UW and Ontario pages, and can be wrong. For anything binding, check with WUSA or the UW Off-Campus Housing Office.</p>
         <a href="https://wusa.ca" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-primary hover:underline">
           wusa.ca <ArrowUpRight className="h-3 w-3" />
         </a>
-        <a href="#/staff" className="text-[11px] text-muted-foreground/70 hover:text-foreground">Staff sign-in</a>
       </div>
     </div>
   )
+}
+
+// What the badge above an answer says it's based on. Only answers that
+// matched an FAQ or an official page get a source label; everything else is
+// marked as a general answer so it doesn't borrow credibility it doesn't have.
+function answerLabel(m, staffHandoff) {
+  if (m.matchType === 'escalation') {
+    return m.escalated && staffHandoff
+      ? { text: 'Urgent · flagged for staff', variant: 'destructive' }
+      : { text: 'Urgent · please contact the numbers below', variant: 'destructive' }
+  }
+  // An answer that cited none of the official pages it was given isn't based on them.
+  if (m.matchType === 'official' && !m.uncited) return { text: 'Based on official UW / Ontario pages', variant: 'primary' }
+  if (m.matchType === 'faq') return { text: `Based on the FAQ · ${m.category}`, variant: 'primary' }
+  return { text: 'General answer · not from a listed source', variant: 'default' }
 }
 
 function BotAvatar() {
@@ -151,6 +167,8 @@ const Chatbot = () => {
   const [mode, setMode] = useState('chat')
   const [totalFAQs, setTotalFAQs] = useState(TOTAL_FAQS_FALLBACK)
   const [totalSources, setTotalSources] = useState(null)
+  // Only promise a person when the server says escalations alert staff.
+  const [staffHandoff, setStaffHandoff] = useState(false)
   const [tickets, setTickets] = useState([])
   const [activityOpen, setActivityOpen] = useState(false)
   const lastMessageId = useRef(0)
@@ -177,6 +195,7 @@ const Chatbot = () => {
       if (cancelled || !data) return
       if (data.totalFAQs) setTotalFAQs(data.totalFAQs)
       if (data.totalSources) setTotalSources(data.totalSources)
+      setStaffHandoff(data.staffHandoff === true)
     }).catch(() => {
       // keep fallback counts — the UI still works, just not live
     })
@@ -321,8 +340,11 @@ const Chatbot = () => {
             citations: p.citations || [],
             steps: p.trace ? stepsFromTrace(p.trace) : m.steps,
             memoryTurns: p.memoryTurns ?? m.memoryTurns,
-            actions: p.actions
+            actions: p.actions,
+            escalated: p.escalated === true,
+            uncited: p.criticFlags?.uncited === true
           }))
+          if (typeof p.staffHandoff === 'boolean') setStaffHandoff(p.staffHandoff)
           if (p.actions?.length) setTimeout(refreshTickets, 0)
         }
       })
@@ -409,7 +431,7 @@ const Chatbot = () => {
               </Button>
             </SheetTrigger>
             <SheetContent side="right">
-              <ActivityPanel tickets={tickets} totalFAQs={totalFAQs} totalSources={totalSources || 0} />
+              <ActivityPanel tickets={tickets} totalFAQs={totalFAQs} totalSources={totalSources || 0} staffHandoff={staffHandoff} />
             </SheetContent>
           </Sheet>
           <Button variant="ghost" size="sm" className="gap-1.5 rounded-full text-muted-foreground" onClick={startNewChat} aria-label="New chat">
@@ -422,7 +444,7 @@ const Chatbot = () => {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <React.Suspense fallback={<div className="flex justify-center py-16 text-muted-foreground"><LoaderCircle className="h-5 w-5 animate-spin" /></div>}>
           {mode === 'lease' && (
-            <LeaseChecker sessionId={sessionId} onSessionId={setSessionId} onTicketCreated={refreshTickets} />
+            <LeaseChecker sessionId={sessionId} onSessionId={setSessionId} onTicketCreated={refreshTickets} staffHandoff={staffHandoff} />
           )}
           {mode === 'listing' && <ScamChecker />}
         </React.Suspense>
@@ -453,7 +475,7 @@ const Chatbot = () => {
                   What do you need to <span className="font-serif italic font-medium text-gradient-brand">sort out</span>?
                 </h1>
                 <p className="max-w-sm text-[14px] leading-relaxed text-muted-foreground">
-                  Housing, rent, transit, health, food, and campus rules — grounded in OCC FAQs and cited official UW and Ontario pages.
+                  An AI assistant for housing, rent, transit, health, food, and campus rules. It cites official UW and Ontario pages where it can — and can still be wrong, so check anything important.
                 </p>
               </div>
             </div>
@@ -557,11 +579,10 @@ const Chatbot = () => {
                   <div className="flex items-start gap-3">
                     <BotAvatar />
                     <div className="min-w-0 flex-1 flex-col gap-1.5">
-                      {!m.streaming && !m.restored && (
-                        <Badge variant={m.matchType === 'faq' || m.matchType === 'official' ? 'primary' : m.matchType === 'escalation' ? 'destructive' : 'default'} className="mb-1.5">
-                          {m.matchType === 'faq' || m.matchType === 'official' ? `OCC · ${m.category}` : m.matchType === 'escalation' ? 'Urgent · escalated to a person' : 'OCC · General answer'}
-                        </Badge>
-                      )}
+                      {!m.streaming && !m.restored && !m.networkError && (() => {
+                        const label = answerLabel(m, staffHandoff)
+                        return <Badge variant={label.variant} className="mb-1.5">{label.text}</Badge>
+                      })()}
                       {m.content ? (
                         <div className="prose prose-sm max-w-none leading-relaxed text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-a:text-primary prose-a:no-underline hover:prose-a:underline prose-code:text-primary prose-blockquote:border-l-primary/50 prose-blockquote:text-muted-foreground prose-hr:border-border prose-th:text-foreground prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 first:prose-p:mt-0 last:prose-p:mb-0">
                           <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{prepareMarkdown(m.content, m.citations)}</ReactMarkdown>
@@ -576,11 +597,11 @@ const Chatbot = () => {
                       {!m.streaming && <Citations citations={m.citations} />}
                       {m.groqDown && (
                         <div className="mt-1.5 rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-xs leading-relaxed text-destructive">
-                          Groq is unavailable right now — this is a fallback keyword match, not a generated answer.
+                          The AI model is unavailable right now, so this is a saved answer or a basic reply — not a full answer to your question. Try again in a few minutes.
                         </div>
                       )}
                       {!m.groqDown && !m.streaming && m.matchType === 'fallback' && !m.networkError && (
-                        <div className="mt-1 text-[11.5px] text-muted-foreground/70">No FAQ or official page matched — this answer draws on general knowledge instead.</div>
+                        <div className="mt-1 text-[11.5px] text-muted-foreground/70">No FAQ or official page matched, so this is the AI's general knowledge — double-check it before relying on it.</div>
                       )}
                       {!m.networkError && !m.restored && (
                         <AgentTrace steps={m.steps} live={m.streaming} memoryTurns={m.memoryTurns} />
@@ -637,9 +658,9 @@ const Chatbot = () => {
             </button>
           </form>
           <div className="mx-auto mt-2 max-w-2xl text-center text-[11px] leading-relaxed text-muted-foreground/70">
-            General guidance only, not official advice — check anything urgent with WUSA or UW directly.
+            AI-generated answers can be wrong — not legal, medical, or official advice. <strong className="font-medium text-foreground/70">In an emergency call 911</strong>; for a mental-health crisis call or text 988.
             <br className="hidden sm:inline" />{' '}
-            Chats are kept up to 90 days so staff can follow up, then deleted. Don&rsquo;t share passwords or banking details.
+            Student-built prototype, not an official OCC or WUSA service. Messages are sent to Groq (the AI provider) to generate answers and stored up to 90 days (open tickets until resolved). Don&rsquo;t share passwords, banking details, or ID numbers.
           </div>
         </div>
       )}

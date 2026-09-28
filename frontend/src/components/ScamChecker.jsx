@@ -45,6 +45,9 @@ export default function ScamChecker() {
         <p className="text-[13.5px] leading-relaxed text-muted-foreground">
           Paste a rental ad or a landlord&rsquo;s message. It&rsquo;s checked against UW Special Constable Service&rsquo;s rental-fraud warning signs and UW Off-Campus Housing&rsquo;s typical rents.
         </p>
+        <p className="text-[11.5px] leading-relaxed text-muted-foreground/80">
+          Checked by rules and by an AI model (sent to Groq); not saved. A low score doesn&rsquo;t prove a listing is safe — never send money before seeing a place.
+        </p>
       </div>
 
       <div className="flex flex-col gap-3 rounded-2xl border border-border bg-panel p-4 shadow-sm">

@@ -37,6 +37,8 @@ function decode(text) {
 function htmlToLines(html) {
   return decode(
     html
+      // Commented-out markup isn't shown on the page, so it can't be cited.
+      .replace(/<!--[\s\S]*?-->/g, '')
       .replace(/<(script|style|nav|footer|button|svg|form)[\s\S]*?<\/\1>/gi, '')
       .replace(/<li[^>]*>/gi, '\n• ')
       .replace(/<\/(p|li|div|tr|h[1-6]|section|article|ul|ol)>/gi, '\n')

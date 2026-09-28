@@ -4,11 +4,11 @@ import { cn } from '@/lib/utils'
 
 // The five pipeline stages, in the order the backend runs them.
 const STAGES = [
-  { key: 'router', label: 'Router', icon: Route },
-  { key: 'critic_pre', label: 'Safety pre-check', icon: ShieldCheck },
-  { key: 'retrieval', label: 'Retrieve & answer', icon: BookOpen },
-  { key: 'action', label: 'Action agent', icon: Wrench },
-  { key: 'critic', label: 'Critic', icon: Gavel }
+  { key: 'router', label: 'Understand', icon: Route },
+  { key: 'critic_pre', label: 'Safety check', icon: ShieldCheck },
+  { key: 'retrieval', label: 'Find & answer', icon: BookOpen },
+  { key: 'action', label: 'Follow-up', icon: Wrench },
+  { key: 'critic', label: 'Final review', icon: Gavel }
 ]
 
 const FLAG_LABELS = {
@@ -32,11 +32,11 @@ function describe(step) {
         step.usedMemory ? 'used earlier turns' : null
       ].filter(Boolean).join(' · ')
     case 'critic_pre':
-      return step.override ? 'safety phrase matched → forced to urgent' : 'no safety phrases found'
+      return step.override ? 'treated as urgent' : 'nothing urgent found'
     case 'retrieval': {
       if (step.skipped) return step.skipped
       const parts = [`${step.faqs?.length || 0} FAQ${step.faqs?.length === 1 ? '' : 's'}`, `${step.sources?.length || 0} official passage${step.sources?.length === 1 ? '' : 's'}`]
-      if (step.groqFailed) parts.push('model unavailable → keyword fallback')
+      if (step.groqFailed) parts.push('AI model unavailable → basic reply')
       return parts.join(' · ')
     }
     case 'action':
@@ -58,10 +58,11 @@ function StepIcon({ status }) {
   return <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30" />
 }
 
-// `steps` is keyed by stage. `live` keeps it expanded while the answer streams.
+// `steps` is keyed by stage. Collapsed by default, including while an answer
+// streams — the details are there for the curious, not in everyone's way.
 export default function AgentTrace({ steps = {}, live = false, memoryTurns = 0 }) {
   const [open, setOpen] = useState(false)
-  const expanded = live || open
+  const expanded = open
   const done = STAGES.map(s => steps[s.key]).filter(s => s && s.status !== 'running')
   const totalMs = done.reduce((sum, s) => sum + (s.ms || 0), 0)
 
@@ -70,14 +71,14 @@ export default function AgentTrace({ steps = {}, live = false, memoryTurns = 0 }
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        disabled={live}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground disabled:cursor-default"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground"
       >
         <Brain className="h-3.5 w-3.5 text-primary" />
-        <span className="font-medium text-foreground/80">{live ? 'Working through the pipeline' : 'How I got this answer'}</span>
+        {live && <LoaderCircle className="h-3.5 w-3.5 animate-spin text-primary" />}
+        <span className="font-medium text-foreground/80">{live ? 'Working on it…' : 'How this answer was made'}</span>
         {!live && <span className="font-mono text-[10.5px]">{done.length} steps · {(totalMs / 1000).toFixed(1)}s</span>}
         {memoryTurns > 0 && <span className="rounded-full bg-accent px-1.5 py-0.5 font-mono text-[10px]">memory: {memoryTurns} earlier message{memoryTurns === 1 ? '' : 's'}</span>}
-        {!live && <ChevronDown className={cn('ml-auto h-3.5 w-3.5 transition-transform', expanded && 'rotate-180')} />}
+        <ChevronDown className={cn('ml-auto h-3.5 w-3.5 transition-transform', expanded && 'rotate-180')} />
       </button>
       {expanded && (
         <ol className="flex flex-col gap-1.5 border-t border-border/70 px-3 py-2.5">

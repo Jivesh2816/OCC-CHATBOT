@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 // Eval runner. Every suite calls the real, running backend over HTTP (not a
 // reimplementation of its logic), so it measures what users actually get.
@@ -19,7 +20,6 @@ const CHAT_DELAY_MS = Number(process.env.EVAL_CHAT_DELAY_MS ?? 5500);
 const TOOL_DELAY_MS = Number(process.env.EVAL_TOOL_DELAY_MS ?? 12500);
 // Sessions carry multi-turn memory, so each run gets fresh session ids —
 // otherwise a case would see its own answer from the previous run as context.
-const RUN_ID = Date.now().toString(36);
 const RESULTS_PATH = path.join(__dirname, 'eval-results.json');
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -51,7 +51,8 @@ function checkCriticFlags(expectedFlags, actualFlags) {
 
 async function runChatCase(testCase) {
   const { id, message, expected = {}, setup = [] } = testCase;
-  const sessionId = `eval-${id}-${RUN_ID}`;
+  // The server only accepts ids it could have minted (random UUIDs).
+  const sessionId = crypto.randomUUID();
 
   // Earlier turns for memory cases, sent in the same session first.
   for (const turn of setup) {

@@ -6,6 +6,7 @@ const { sourcesById } = require('../lib/knowledge');
 const { analyzeLease } = require('../lib/lease');
 const { analyzeListing } = require('../lib/scam');
 const { now, createTicketRecord } = require('../lib/tickets');
+const { isSessionId } = require('../lib/validate');
 const { toolLimits } = require('../middleware/rateLimits');
 
 const router = express.Router();
@@ -26,6 +27,7 @@ router.post('/lease/check', toolLimits, async (req, res) => {
     let { text, pdfBase64 } = req.body || {};
     let pages = null;
 
+    if (pdfBase64 !== undefined && typeof pdfBase64 !== 'string') return res.status(400).json({ error: 'Upload a PDF file.' });
     if (pdfBase64) {
       const extracted = await extractPdfText(pdfBase64);
       text = extracted.text;
@@ -34,7 +36,7 @@ router.post('/lease/check', toolLimits, async (req, res) => {
         return res.status(422).json({ error: 'That PDF has no selectable text (it may be a scan). Paste the lease text instead.' });
       }
     }
-    if (!text || text.trim().length < 50) return res.status(400).json({ error: 'Paste at least a few lines of the lease, or upload a PDF.' });
+    if (typeof text !== 'string' || text.trim().length < 50) return res.status(400).json({ error: 'Paste at least a few lines of the lease, or upload a PDF.' });
 
     const truncated = text.length > MAX_LEASE_CHARS;
     const result = await analyzeLease(text.slice(0, MAX_LEASE_CHARS), {
@@ -53,13 +55,17 @@ router.post('/lease/check', toolLimits, async (req, res) => {
 router.post('/lease/escalate', toolLimits, async (req, res) => {
   try {
     const { sessionId: incoming, findings = [] } = req.body || {};
-    if (!Array.isArray(findings) || findings.length === 0) return res.status(400).json({ error: 'No findings to send.' });
-    const sessionId = incoming || crypto.randomUUID();
+    if (!Array.isArray(findings) || findings.length === 0 || findings.length > 50) return res.status(400).json({ error: 'No findings to send.' });
+    const sessionId = isSessionId(incoming) ? incoming : crypto.randomUUID();
     await db.run('INSERT OR IGNORE INTO sessions (id, created_at) VALUES (?, ?)', [sessionId, now()]);
 
-    const lines = findings.slice(0, 20).map(f => `• [${f.severity}] ${f.title} (clause ${f.clauseNumber}): "${String(f.quote || '').slice(0, 200)}"`);
-    const summary = `Lease review requested — ${findings.length} flagged clause(s).`;
-    const ticket = await createTicketRecord({ category: 'lease_review', summary, priority: 'normal' }, lines.join('\n'), 'housing', sessionId);
+    // Findings come from the browser, so every field is treated as untrusted text.
+    const field = (value, max) => String(value ?? '').replace(/\s+/g, ' ').slice(0, max);
+    const kept = findings.slice(0, 20).filter(f => f && typeof f === 'object');
+    const lines = kept.map(f => `• [${field(f.severity, 12)}] ${field(f.title, 120)} (clause ${field(f.clauseNumber, 10)}): "${field(f.quote, 200)}"`);
+    const summary = `Lease review requested — ${kept.length} flagged clause(s).`;
+    // One open lease review per conversation: a second click adds to it.
+    const ticket = await createTicketRecord({ category: 'lease_review', summary, priority: 'normal' }, lines.join('\n'), 'housing', sessionId, { leaseReview: true });
     res.json({ sessionId, ...ticket });
   } catch (error) {
     console.error('Lease escalation failed:', error);
@@ -72,7 +78,7 @@ router.post('/lease/escalate', toolLimits, async (req, res) => {
 router.post('/listing/check', toolLimits, async (req, res) => {
   try {
     const { text } = req.body || {};
-    if (!text || text.trim().length < 30) return res.status(400).json({ error: 'Paste the listing or the landlord\'s message (at least a couple of sentences).' });
+    if (typeof text !== 'string' || text.trim().length < 30) return res.status(400).json({ error: 'Paste the listing or the landlord\'s message (at least a couple of sentences).' });
     const result = await analyzeListing(text.slice(0, 20000), {
       complete: process.env.GROQ_API_KEY ? completeJSON : null,
       sourcesById
