@@ -13,6 +13,8 @@ const { createIndex } = require('./lib/bm25');
 const critic = require('./lib/critic');
 const { analyzeLease } = require('./lib/lease');
 const { analyzeListing } = require('./lib/scam');
+const { alertChannels, sendEscalationAlert } = require('./lib/alerts');
+const { rateLimit } = require('express-rate-limit');
 
 // Groq AI
 const Groq = require('groq-sdk');
@@ -35,6 +37,7 @@ const PORT = process.env.PORT || 5000;
 console.log('Groq enabled:', !!process.env.GROQ_API_KEY);
 console.log('Database:', db.kind);
 console.log('Staff dashboard:', process.env.STAFF_TOKEN ? 'enabled' : 'disabled (no STAFF_TOKEN)');
+console.log('Staff alerts:', alertChannels().join(', ') || 'none configured');
 
 // Load FAQ data
 let faqData = {};
@@ -67,16 +70,26 @@ const QUERY_SYNONYMS = {
   raise: 'increase guideline', hike: 'increase guideline',
   kick: 'evict eviction terminate', kicked: 'evict eviction terminate', evicted: 'eviction', evicting: 'eviction',
   scam: 'fraud scam', scammed: 'fraud scam', fake: 'fraud scam',
-  enter: 'entry notice', entering: 'entry notice', barge: 'entry notice'
+  enter: 'entry notice', entering: 'entry notice', barge: 'entry notice',
+  break: 'terminate termination', breaking: 'terminate termination'
 };
+const PHRASE_SYNONYMS = [
+  [/\bget out of (my|the|a) (lease|contract)\b/, 'terminate termination'],
+  [/\bmove out early\b/, 'terminate termination']
+];
 function expandQuery(query) {
-  const extra = query.toLowerCase().split(/[^a-z']+/).map(w => QUERY_SYNONYMS[w]).filter(Boolean);
+  const lower = query.toLowerCase();
+  const extra = lower.split(/[^a-z']+/).map(w => QUERY_SYNONYMS[w]).filter(Boolean);
+  for (const [pattern, words] of PHRASE_SYNONYMS) if (pattern.test(lower)) extra.push(words);
   return extra.length ? `${query} ${extra.join(' ')}` : query;
 }
 console.log(`Official sources loaded: ${officialSources.length} passages`);
 
 // Middleware
 app.use(cors());
+// On Vercel the client IP arrives in X-Forwarded-For from Vercel's own proxy.
+// Only trust that header there — locally anyone could spoof it to dodge limits.
+if (process.env.VERCEL) app.set('trust proxy', 1);
 // Lease PDFs arrive base64-encoded in JSON; Vercel caps request bodies at 4.5 MB.
 app.use(express.json({ limit: '6mb' }));
 
@@ -278,15 +291,20 @@ async function classifyIntent(message, history = []) {
   return null;
 }
 
-const URGENT_ESCALATION_MESSAGE = `⚠️ This sounds like it may need more urgent, real-world help than a chatbot can give.
+const URGENT_RESOURCES = `⚠️ This sounds like it may need more urgent, real-world help than a chatbot can give.
 
 Please reach out directly:
 • **Emergency**: 911
 • **Campus Police**: 519-888-4911
 • **Waterloo Regional Police (non-emergency)**: 519-570-9777
-• **Good2Talk (student mental health line)**: 1-866-925-5454
+• **Good2Talk (student mental health line)**: 1-866-925-5454`;
 
-This conversation has also been flagged for follow-up by a person, and any reply will show up right here — but please don't wait on that if you're in danger. Use the numbers above.`;
+// Only promise a person when staff actually get notified — a queue nobody is
+// alerted to isn't a handoff, and a student in crisis shouldn't be told one is
+// coming when it may not be.
+const URGENT_ESCALATION_MESSAGE = alertChannels().length
+  ? `${URGENT_RESOURCES}\n\nThis conversation has also been sent to the Off-Campus support team, and any reply will show up right here — but please don't wait on that if you're in danger. Use the numbers above.`
+  : `${URGENT_RESOURCES}\n\nPlease use the numbers above — they're staffed by people who can help right now.`;
 
 // Function to search FAQ for matching questions
 function searchFAQ(userMessage) {
@@ -476,7 +494,9 @@ async function retrievalAgent(message, intent, { history = [], onToken = null, o
   }
 
   console.error('Retrieval agent: Groq returned nothing, using fallbacks');
-  const faqMatch = searchFAQ(message);
+  // Prefer the FAQ retrieval already ranked for this intent; the stricter
+  // whole-question matcher only covers the case where nothing was ranked.
+  const faqMatch = relevantFAQs[0] || searchFAQ(message);
   if (faqMatch) {
     console.log('Retrieval agent: used FAQ fallback');
     return {
@@ -541,7 +561,12 @@ async function escalateTicketRecord({ ticketId, reason }) {
 
   await db.run('UPDATE tickets SET escalated = 1, status = ?, escalation_reason = ? WHERE id = ?', ['escalated', reason, ticketId]);
   console.log('Action agent: escalated ticket', ticketId, '-', reason);
-  return { ticketId, status: 'escalated', escalated: true };
+
+  // Only the first escalation alerts staff. Awaited (with a timeout inside)
+  // rather than fire-and-forget: a serverless function can be frozen as soon
+  // as the response is sent, which would silently drop the alert.
+  const alert = ticket.escalated ? { skipped: 'already escalated' } : await sendEscalationAlert({ ...ticket, escalated: 1 }, reason);
+  return { ticketId, status: 'escalated', escalated: true, staffAlerted: alert.sent?.length > 0 };
 }
 
 // Explicit function-calling schemas — the model can only take these three
@@ -859,6 +884,40 @@ function requireStaff(req, res, next) {
 }
 
 // ---------------------------------------------------------------------------
+// Rate limits, per client IP. Every chat message costs up to 3 Groq calls and
+// a lease check can send ~4k tokens, so one person hammering the public
+// endpoints could exhaust the free-tier quota and take the demo down for
+// everyone. Limits are env-tunable (e.g. raised for an eval run). The store is
+// in-memory, i.e. per serverless instance — a spike can land on several
+// instances, so this caps abuse rather than enforcing an exact global quota.
+// ---------------------------------------------------------------------------
+
+const envInt = (name, fallback) => Number.parseInt(process.env[name], 10) || fallback;
+
+function limiter(windowMs, limit, message) {
+  return rateLimit({
+    windowMs,
+    limit,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    handler: (req, res) => res.status(429).json({ error: message, rateLimited: true })
+  });
+}
+
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
+const chatLimits = [
+  limiter(MINUTE, envInt('RATE_LIMIT_CHAT_PER_MIN', 12), "You're sending messages quickly — give it a minute and try again."),
+  limiter(HOUR, envInt('RATE_LIMIT_CHAT_PER_HOUR', 100), "You've hit this hour's message limit. Try again a little later.")
+];
+const toolLimits = [
+  limiter(MINUTE, envInt('RATE_LIMIT_TOOLS_PER_MIN', 5), 'Too many checks in a row — give it a minute and try again.'),
+  limiter(HOUR, envInt('RATE_LIMIT_TOOLS_PER_HOUR', 30), "You've hit this hour's limit for lease and listing checks.")
+];
+// Slows brute-forcing the shared staff token.
+const staffLimit = limiter(MINUTE, envInt('RATE_LIMIT_STAFF_PER_MIN', 60), 'Too many staff requests — slow down.');
+
+// ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 
@@ -874,7 +933,7 @@ app.get('/topics', (req, res) => {
   });
 });
 
-app.post('/chat', async (req, res) => {
+app.post('/chat', chatLimits, async (req, res) => {
   try {
     const { message, sessionId } = req.body;
     if (!message) return res.status(400).json({ error: 'Message is required' });
@@ -888,7 +947,7 @@ app.post('/chat', async (req, res) => {
 // Same pipeline, streamed as newline-delimited JSON: session → step events as
 // each stage starts/finishes → answer tokens → a final "done" with the full
 // payload (which includes any critic edits to the streamed text).
-app.post('/chat/stream', async (req, res) => {
+app.post('/chat/stream', chatLimits, async (req, res) => {
   const { message, sessionId } = req.body || {};
   if (!message) return res.status(400).json({ error: 'Message is required' });
 
@@ -958,7 +1017,7 @@ async function extractPdfText(base64) {
   return { text: text || '', pages: totalPages };
 }
 
-app.post('/lease/check', async (req, res) => {
+app.post('/lease/check', toolLimits, async (req, res) => {
   try {
     let { text, pdfBase64 } = req.body || {};
     let pages = null;
@@ -987,7 +1046,7 @@ app.post('/lease/check', async (req, res) => {
 
 // Hands a lease review to a person: opens a normal-priority ticket on the
 // student's session with the flagged clauses as its summary.
-app.post('/lease/escalate', async (req, res) => {
+app.post('/lease/escalate', toolLimits, async (req, res) => {
   try {
     const { sessionId: incoming, findings = [] } = req.body || {};
     if (!Array.isArray(findings) || findings.length === 0) return res.status(400).json({ error: 'No findings to send.' });
@@ -1006,7 +1065,7 @@ app.post('/lease/escalate', async (req, res) => {
 
 // --- Listing Scam Checker --------------------------------------------------
 
-app.post('/listing/check', async (req, res) => {
+app.post('/listing/check', toolLimits, async (req, res) => {
   try {
     const { text } = req.body || {};
     if (!text || text.trim().length < 30) return res.status(400).json({ error: 'Paste the listing or the landlord\'s message (at least a couple of sentences).' });
@@ -1025,7 +1084,7 @@ app.post('/listing/check', async (req, res) => {
 
 const TICKET_STATUSES = ['open', 'escalated', 'in_progress', 'resolved'];
 
-app.get('/staff/tickets', requireStaff, async (req, res) => {
+app.get('/staff/tickets', staffLimit, requireStaff, async (req, res) => {
   const rows = await db.all(`
     SELECT t.*, (SELECT COUNT(*) FROM ticket_replies r WHERE r.ticket_id = t.id) AS reply_count
     FROM tickets t
@@ -1034,7 +1093,7 @@ app.get('/staff/tickets', requireStaff, async (req, res) => {
   res.json({ tickets: rows.map(r => formatTicket(r)) });
 });
 
-app.get('/staff/tickets/:id', requireStaff, async (req, res) => {
+app.get('/staff/tickets/:id', staffLimit, requireStaff, async (req, res) => {
   const row = await findTicket(req.params.id);
   if (!row) return res.status(404).json({ error: 'Ticket not found' });
   const replies = await db.all('SELECT id, author, content, created_at FROM ticket_replies WHERE ticket_id = ? ORDER BY id', [row.id]);
@@ -1044,7 +1103,7 @@ app.get('/staff/tickets/:id', requireStaff, async (req, res) => {
   res.json({ ticket: formatTicket(row, replies), conversation, criticLog });
 });
 
-app.post('/staff/tickets/:id/reply', requireStaff, async (req, res) => {
+app.post('/staff/tickets/:id/reply', staffLimit, requireStaff, async (req, res) => {
   const content = String(req.body?.content || '').trim();
   const author = String(req.body?.author || 'OCC staff').trim().slice(0, 60) || 'OCC staff';
   if (!content) return res.status(400).json({ error: 'Reply text is required' });
@@ -1059,7 +1118,7 @@ app.post('/staff/tickets/:id/reply', requireStaff, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.patch('/staff/tickets/:id', requireStaff, async (req, res) => {
+app.patch('/staff/tickets/:id', staffLimit, requireStaff, async (req, res) => {
   const { status } = req.body || {};
   if (!TICKET_STATUSES.includes(status)) return res.status(400).json({ error: `status must be one of ${TICKET_STATUSES.join(', ')}` });
   const result = await db.run('UPDATE tickets SET status = ? WHERE id = ?', [status, req.params.id]);
@@ -1069,14 +1128,14 @@ app.patch('/staff/tickets/:id', requireStaff, async (req, res) => {
 
 // Every critic decision, fired or not — the raw material for the eval set.
 // Staff-only: rows contain students' raw messages.
-app.get('/staff/critic-log', requireStaff, async (req, res) => {
+app.get('/staff/critic-log', staffLimit, requireStaff, async (req, res) => {
   const rows = await db.all('SELECT * FROM critic_log ORDER BY id DESC LIMIT 500');
   res.json({ criticLog: rows.map(({ flags_json, ...row }) => ({ ...row, flags: JSON.parse(flags_json) })) });
 });
 
 // Old public paths, now behind the staff token.
-app.get('/tickets', requireStaff, (_req, res) => res.redirect(307, '/staff/tickets'));
-app.get('/critic-log', requireStaff, (_req, res) => res.redirect(307, '/staff/critic-log'));
+app.get('/tickets', staffLimit, requireStaff, (_req, res) => res.redirect(307, '/staff/tickets'));
+app.get('/critic-log', staffLimit, requireStaff, (_req, res) => res.redirect(307, '/staff/critic-log'));
 
 app.use((error, req, res, next) => {
   console.error('Unhandled route error:', error);

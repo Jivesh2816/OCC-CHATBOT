@@ -21,7 +21,8 @@ An AI assistant for University of Waterloo students living off campus. It answer
 - **Multi-turn memory.** Recent turns go to the router, generator, and action agent, so "what if they keep doing it?" is understood in context. Refreshing the page restores the conversation.
 - **Lease Checker.** Paste a lease or upload a PDF. Ten rules (no-pets, no-guests, damage deposits, late fees, tenant-pays-repairs, entry without notice, and more) are each backed by an official passage. A regex pass and an LLM pass run together; the model can only point at clause numbers and rule ids, which are validated, so every flag quotes real lease text.
 - **Listing Scam Check.** Scores a rental ad against UW Special Constable Service's rental-fraud warning signs and UW's published rent estimates. The model must quote the listing verbatim or its signal is dropped, and the risk level is computed from the validated signals, not by the model.
-- **Human in the loop.** The action agent can open, escalate, and draft follow-ups on tickets through function calling. Staff work them from a token-protected queue (`/#/staff`), and their replies appear in the student's chat.
+- **Human in the loop.** The action agent can open, escalate, and draft follow-ups on tickets through function calling. Every escalation alerts staff by Slack/Discord webhook or email (ticket metadata only, never the student's words). Staff work tickets from a token-protected queue (`/#/staff`), and their replies appear in the student's chat.
+- **Abuse protection.** Per-IP rate limits on the endpoints that call the model, so one person can't exhaust the Groq quota and take the demo down for everyone.
 - **Rule-based critic.** A deterministic safety net: it overrides the router on crisis phrases, adds a legal disclaimer to legal-advice phrasing, force-escalates high-priority tickets the agent left unescalated, and opens a ticket for any urgent message the agent didn't act on. Every decision is logged.
 
 ## How it works
@@ -54,7 +55,25 @@ More detail, including the API, data model, and design decisions: [HOW_IT_WORKS.
 
 **Frontend:** React 18 · Vite · Tailwind CSS v4 · Radix primitives · GSAP · Vanta.js · react-markdown.
 
-**Quality:** 30 unit tests (`node:test`) covering the critic, lease rules, scam signals, and retrieval ranking · a 26-case eval harness that runs the real `/chat` pipeline.
+**Quality:** 38 unit tests (`node:test`) covering the critic, lease rules, scam signals, retrieval ranking, and staff alerts · a 55-case eval harness that runs against the live HTTP API.
+
+## Evaluation
+
+`npm run eval` sends every case through the running backend, the same code path users hit. Results from 2026-09-28, local backend, Groq `openai/gpt-oss-20b`:
+
+| Suite | Metric | Result |
+|---|---|---|
+| **Chat** (34 cases) | Router intent accuracy | 27/29 |
+| | Answers citing an official source, when one applies | 5/5 |
+| | Expected official passage retrieved | 5/5 |
+| | Vague follow-ups resolved using memory | 3/3 |
+| | Urgent messages that ended in an escalated ticket | 3/3 |
+| **Lease** (13 leases, 13 planted clauses) | Rules + model: precision / recall | 100% / 100% |
+| | Rules alone: precision / recall | 100% / 62% |
+| **Scam** (8 listings) | Risk level correct | 7/8 |
+| | Scams flagged medium or high · legitimate listings marked low | 5/5 · 3/3 |
+
+Read these as a regression suite, not a benchmark: the sets are small and hand-written, and the model isn't deterministic. An earlier run the same day scored the lease suite 92% / 92% after the model flagged a snow-removal clause as a landlord repair. What's left failing is shown, not tuned away. Two intent labels are genuinely ambiguous (splitting utilities with roommates: `housing` or `rent_money`?), and one scam listing that asks for banking details before a viewing scores medium where a person would probably say high.
 
 ## Running locally
 
@@ -70,11 +89,14 @@ cd frontend && npm install && npm run dev     # http://localhost:3000 (proxies /
 | `GROQ_API_KEY` | yes | LLM calls |
 | `STAFF_TOKEN` | for the staff queue | Shared secret for `/#/staff`. Without it, staff routes are disabled. |
 | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | for hosted persistence | Without them, data lives in a local SQLite file (on Vercel, in `/tmp`, which resets). |
+| `STAFF_ALERT_WEBHOOK_URL` | recommended | Slack or Discord webhook pinged on every escalation. Without it (or SMTP below), the crisis reply doesn't promise human follow-up. |
+| `SMTP_URL`, `STAFF_ALERT_EMAIL` | optional | Email alerts on escalation instead of, or as well as, the webhook. |
+| `RATE_LIMIT_*` | optional | Per-IP limits (defaults: 12 chats/min and 100/hour; 5 lease/listing checks/min and 30/hour). |
 
 ```bash
 cd backend
 npm test                # unit tests
-npm run eval            # eval set against a running backend (EVAL_BASE_URL to override)
+npm run eval            # chat + lease + scam suites against a running backend (EVAL_BASE_URL to override)
 npm run build:sources   # re-scrape the official passages into sources/official.json
 ```
 

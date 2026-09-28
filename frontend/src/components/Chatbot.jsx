@@ -325,11 +325,15 @@ const Chatbot = () => {
           if (p.actions?.length) setTimeout(refreshTickets, 0)
         }
       })
-    } catch {
+    } catch (error) {
       updateLastBot(m => ({
         ...m,
         streaming: false,
-        content: "Couldn't reach the server just now. Try again in a moment.",
+        content: error?.rateLimited
+          ? error.message
+          : error?.response?.status === 429
+            ? error.response.data?.error || "You're sending messages quickly — give it a minute and try again."
+            : "Couldn't reach the server just now. Try again in a moment.",
         matchType: 'fallback',
         networkError: true
       }))

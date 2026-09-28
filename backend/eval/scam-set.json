@@ -1,0 +1,42 @@
+[
+  {
+    "id": "scam-overseas-wire",
+    "text": "Beautiful 2 bedroom apartment near UW for $750/month. I'm working overseas so I can't show it, but once you send the first month by wire transfer I'll courier the keys.",
+    "expect": "high"
+  },
+  {
+    "id": "scam-overpayment",
+    "text": "Hi, I'd like to rent your room for the fall. I've mailed a cheque for $2,400 — that's more than the rent, so please e-transfer the difference back to my agent once it arrives.",
+    "expect": "high"
+  },
+  {
+    "id": "scam-crypto",
+    "text": "Studio downtown Waterloo, $1,000/month. Payment accepted in bitcoin only. Serious inquiries only.",
+    "expect": "high"
+  },
+  {
+    "id": "scam-too-cheap-basement",
+    "text": "Basement unit with separate entrance near Laurier, only $450 a month utilities included. Message me for details.",
+    "expect": "medium"
+  },
+  {
+    "id": "scam-banking-questionnaire",
+    "text": "Room available in a shared house on Lester St, $880/month. Before we book a viewing please fill out the attached questionnaire with your banking information and SIN.",
+    "expect": "high"
+  },
+  {
+    "id": "legit-shared-room",
+    "text": "Room in a shared house on Columbia St, $850/month plus utilities. Viewings on weekday evenings — message me to book a time. Standard Ontario lease and last month's rent deposit.",
+    "expect": "low"
+  },
+  {
+    "id": "legit-busy-listing",
+    "text": "2 bedroom apartment in Uptown, $2,050/month. Lots of students are interested so viewings are this Saturday 10am–2pm at the building. Standard lease.",
+    "expect": "low"
+  },
+  {
+    "id": "legit-studio-credit-check",
+    "text": "Bright studio near the ION, $1,050/month. We'll show it any afternoon this week. With your consent we run a credit check before signing the standard lease.",
+    "expect": "low"
+  }
+]

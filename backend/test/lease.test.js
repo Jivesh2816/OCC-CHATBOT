@@ -26,11 +26,16 @@ test('flags the void clauses listed in the standard-lease guide', () => {
   assert.deepEqual(rulesFor('The tenant shares the kitchen and bathroom with the owner.'), ['shared_with_owner']);
 });
 
+test('keeps very short clauses like "No pets."', () => {
+  assert.deepEqual(rulesFor('3. No pets.\n4. Rent is due on the first.'), ['no_pets']);
+});
+
 test('does not flag lawful versions of the same topics', () => {
   assert.deepEqual(rulesFor('The tenant must pay for any repairs to damage caused by the tenant or their guests.'), []);
   assert.deepEqual(rulesFor('In an emergency the landlord may enter at any time.'), []);
   assert.deepEqual(rulesFor('The tenant shall not sublet without the landlord\'s written consent.'), []);
   assert.deepEqual(rulesFor('The carpet will be professionally cleaned before move-in.'), []);
+  assert.deepEqual(rulesFor('A refundable key deposit of $50 is required.'), []);
 });
 
 test('marks deposits and shared-kitchen arrangements as "check", not void', () => {

@@ -23,6 +23,13 @@ export async function streamChat({ message, sessionId }, onEvent) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, sessionId })
     })
+    if (res.status === 429) {
+      // Rate limited: retrying via /chat would just be limited too.
+      const body = await res.json().catch(() => ({}))
+      const error = new Error(body.error || 'Too many messages — try again in a minute.')
+      error.rateLimited = true
+      throw error
+    }
     if (!res.ok || !res.body) throw new Error(`stream HTTP ${res.status}`)
 
     const reader = res.body.getReader()
@@ -49,7 +56,7 @@ export async function streamChat({ message, sessionId }, onEvent) {
   } catch (error) {
     // Only retry without streaming if nothing was processed yet — otherwise
     // the message was already stored server-side and a retry would duplicate it.
-    if (sawEvent) throw error
+    if (sawEvent || error.rateLimited) throw error
     const res = await axios.post(`${API_BASE_URL}/chat`, { message, sessionId })
     onEvent({ type: 'done', payload: res.data })
   }
