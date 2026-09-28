@@ -1,0 +1,74 @@
+[
+  {
+    "id": "lease-clean-standard",
+    "note": "Lawful clauses on the same topics the rules watch — nothing void should fire.",
+    "text": "The tenant shall pay rent of $1,000 on the first day of each month.\nThe landlord shall maintain the rental unit in a good state of repair.\nThe landlord may enter the unit with 24 hours' written notice between 8 a.m. and 8 p.m.\nThe tenant must pay for any damage caused by the tenant or their guests.\nA refundable key deposit of $50 is required.",
+    "expect": [],
+    "forbid": ["no_pets", "no_guests", "prohibited_fees", "late_penalty", "tenant_repairs", "entry_without_notice", "no_sublet"]
+  },
+  {
+    "id": "lease-animals",
+    "text": "Animals of any kind are not permitted in the rental unit.",
+    "expect": ["no_pets"]
+  },
+  {
+    "id": "lease-visitor-cap",
+    "text": "Tenants may not have overnight visitors more than twice a week.",
+    "expect": ["no_guests"]
+  },
+  {
+    "id": "lease-cleaning-charge",
+    "text": "A non-refundable cleaning charge of $200 will be deducted when the tenant moves out.",
+    "expect": ["prohibited_fees"]
+  },
+  {
+    "id": "lease-daily-penalty",
+    "text": "Rent paid after the 5th of the month incurs a penalty of $25 per day.",
+    "expect": ["late_penalty"]
+  },
+  {
+    "id": "lease-all-repairs",
+    "text": "The tenant is responsible for all plumbing and appliance repairs regardless of cause.",
+    "expect": ["tenant_repairs"]
+  },
+  {
+    "id": "lease-showings",
+    "text": "The landlord or their agent may show the unit to prospective tenants without prior notice.",
+    "expect": ["entry_without_notice"]
+  },
+  {
+    "id": "lease-no-assignment",
+    "text": "The tenant agrees not to sublet or assign this lease under any circumstances.",
+    "expect": ["no_sublet"]
+  },
+  {
+    "id": "lease-shared-washroom",
+    "text": "The tenant will share the kitchen and washroom with the landlord's family, who live upstairs.",
+    "expect": ["shared_with_owner"]
+  },
+  {
+    "id": "lease-rent-control",
+    "text": "This unit is exempt from rent control because it was first occupied in 2021.",
+    "expect": ["rent_control_exempt"]
+  },
+  {
+    "id": "lease-lawful-rules",
+    "note": "Smoking rules and tenant insurance are allowed additional terms; snow removal isn't a landlord repair.",
+    "text": "No smoking is permitted inside the unit.\nThe tenant is responsible for snow removal on the front walkway.\nThe tenant must obtain tenant insurance before move-in.",
+    "expect": [],
+    "forbid": ["no_pets", "no_guests", "prohibited_fees", "late_penalty", "tenant_repairs", "entry_without_notice", "no_sublet"]
+  },
+  {
+    "id": "lease-guests-welcome",
+    "text": "Guests are welcome; the tenant is responsible for the behaviour of their guests.",
+    "expect": [],
+    "forbid": ["no_guests"]
+  },
+  {
+    "id": "lease-kitchen-sink",
+    "note": "A realistic bad lease with several void clauses mixed in with lawful ones.",
+    "text": "1. Rent is $875 per month for a room in a shared house.\n2. A damage deposit of $400 is due at signing.\n3. No pets.\n4. The tenant pays a $40 late fee for rent received after the 1st.\n5. The landlord may access the room at any time to check cleanliness.\n6. The tenant must keep common areas clean.",
+    "expect": ["prohibited_fees", "no_pets", "late_penalty", "entry_without_notice"],
+    "forbid": ["no_guests", "no_sublet"]
+  }
+]

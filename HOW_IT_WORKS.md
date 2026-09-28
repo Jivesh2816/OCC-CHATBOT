@@ -13,6 +13,7 @@ backend/
 │   ├── lease.js            # Lease Checker rules + validated LLM pass
 │   ├── scam.js             # Listing Scam Check signals + validated LLM pass
 │   ├── bm25.js             # BM25 ranking over the official passages
+│   ├── alerts.js           # Slack/Discord webhook + email alerts on escalation
 │   └── cite.js             # passage ids → source links
 ├── faq.json                # 42 curated Q&A entries in 8 categories
 ├── sources/official.json   # 125 verbatim passages from official pages (generated)
@@ -69,6 +70,38 @@ Eight warning signs taken from UW Special Constable Service's rental-fraud page,
 ## Official sources
 
 `npm run build:sources` fetches 10 pages (UW Off-Campus Housing, Government of Ontario rental pages, UW Special Constable Service), keeps the `<main>` content, and splits it by heading into passages of at most 1,100 characters. Each passage records its URL, heading, and fetch date. The output is committed, so production never scrapes at request time.
+
+## Staff alerts (`lib/alerts.js`)
+
+When a ticket is escalated for the first time, by the action agent or the critic, the backend alerts staff through every configured channel: a Slack or Discord webhook (`STAFF_ALERT_WEBHOOK_URL`) and/or email (`SMTP_URL` + `STAFF_ALERT_EMAIL`).
+
+- **Content:** the alert contains the ticket id, category, priority, who escalated it, and a dashboard link. It never includes the student's message or the agent-written escalation reason, which usually paraphrases the message, so crisis text never lands in a chat channel or inbox.
+- **Timing:** alerts are awaited, with a 4-second timeout, before the response is sent. Serverless functions can be frozen once they respond, so fire-and-forget could silently drop an alert. A failed channel is logged and never breaks the chat.
+- **Crisis reply wording:** the reply promises that the support team has been notified only when at least one alert channel is configured. Otherwise it points only to the phone lines.
+
+## Rate limits
+
+`express-rate-limit`, per client IP, on everything that calls the model. The defaults are env-tunable:
+
+| Endpoint | Per minute | Per hour |
+|---|---|---|
+| `/chat`, `/chat/stream` | 12 | 100 |
+| `/lease/check`, `/lease/escalate`, `/listing/check` | 5 | 30 |
+| `/staff/*` (slows token guessing) | 60 | — |
+
+On Vercel, `trust proxy` is enabled so `req.ip` is the real client from `X-Forwarded-For`. It stays off locally, where that header could be spoofed. The counters live in memory, which on serverless means per instance, so this caps abuse rather than enforcing an exact global quota.
+
+The underlying constraint is Groq's free tier: **8,000 tokens per minute** for `gpt-oss-20b`, shared by all users. A chat message costs about 3 calls (router, answer, and action agent), so the deployment realistically serves only a few messages per minute in total. When Groq returns 429, retrieval falls back to the best-ranked FAQ answer and the UI says the model was unavailable.
+
+## Evaluation (`eval/`)
+
+`npm run eval [chat|lease|scam]` calls the running backend over HTTP. The default delays keep it under the server's own rate limits; set `EVAL_CHAT_DELAY_MS` and `EVAL_TOOL_DELAY_MS` lower only against a server started with higher `RATE_LIMIT_*` values.
+
+- **chat** (`eval-set.json`, 34 cases): router intent, match type, critic flags, whether the answer cites an official passage, whether the expected passage was retrieved, multi-turn follow-ups (`setup` turns sent first in the same session), and that urgent messages end with an escalated ticket.
+- **lease** (`lease-set.json`, 13 leases): precision and recall over planted void clauses, scored twice, once for rules plus model and once for rules alone, to show what the model pass adds. Any unexpected `void` flag counts as a false positive.
+- **scam** (`scam-set.json`, 8 listings): risk-level accuracy, the share of scams flagged, and the share of legitimate listings marked low.
+
+Results go to `eval/eval-results.json` (git-ignored). The README lists the latest numbers.
 
 ## Data model
 

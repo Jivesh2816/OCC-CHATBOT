@@ -25,7 +25,7 @@ const SIGNALS = [
     covers: 'requests to send a deposit or rent before an in-person viewing, or statements that the unit cannot be viewed',
     sourceIds: ['frauds-and-scams-1', 'frauds-and-scams-2', 'know-your-rights-7'],
     patterns: [
-      /\b(before|prior to)\b[^.]{0,30}\b(viewing|showing|seeing|see the)\b/i,
+      /\b(pay|paid|payment|send|deposit|e-?transfer|money|rent)\b[^.]{0,40}\b(before|prior to)\b[^.]{0,30}\b(viewing|showing|seeing|see the)\b/i,
       /\b(can'?t|cannot|unable to|not able to|no)\b[^.]{0,25}\b(show|view|viewing|showings|tour)\b/i,
       /\b(deposit|payment|e-?transfer)\b[^.]{0,40}\b(to (hold|secure|reserve))\b/i,
       /\bkeys?\b[^.]{0,40}\b(mail|mailed|courier|ship|shipped|sent to you)\b/i

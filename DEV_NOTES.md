@@ -53,3 +53,15 @@ Also replaced raw markdown text — bot answers were dumping literal `**bold**`,
 **Streaming.** `/chat/stream` emits NDJSON step events and answer tokens from the same `runPipeline()` that `/chat` uses. Whether Vercel's Node runtime flushes the stream incrementally is untested; the client falls back to `/chat` if the stream fails before any event arrives.
 
 **Verified locally**, not just built: 30 unit tests pass, and a Playwright run drove streaming, citations, follow-up memory, reload-restore, lease check with PDF upload and send-to-advisor, scam check, the mobile layout, and a staff reply appearing in the student's chat, with no console errors.
+
+## 2026-09-28 (later) — Staff alerts, rate limits, expanded eval
+
+**A queue nobody watches isn't a handoff.** Escalations now alert staff by Slack/Discord webhook or email. The first live test caught a privacy leak in my own design: the alert included the escalation *reason*, which the action agent writes, and it read "Student reports stalking…", a paraphrase of the crisis message. Alerts now carry only ticket metadata and who escalated it. The crisis reply promises human follow-up only when an alert channel is configured; otherwise it points only to the phone lines.
+
+**Rate limits exist because of Groq's free tier, not just abuse.** The eval hit Groq's 8,000 tokens-per-minute cap even at a gentle pace. At ~3 calls per chat message, the whole deployment realistically serves a few messages per minute, so one person scripting requests could take it down for everyone. Per-IP limits cap that; they're in-memory per serverless instance, so they're a brake, not an exact quota.
+
+**The expanded eval found real bugs, not just numbers.** (1) The lease splitter dropped clauses under 12 characters, so "No pets." was invisible to both detectors. (2) When Groq hit its rate limit, retrieval fell back to a generic keyword reply even though it had already ranked three relevant FAQs; it now serves the top-ranked FAQ. (3) "How do I get out of my lease early?" retrieved nothing: the right passage ranked first but scored under the cutoff, because "get out of" carries no signal. Phrase synonyms fixed it without lowering the threshold, which would have let noise back in. (4) The scam checker's "pay before viewing" rule fired on any "before … viewing", even with no money involved.
+
+**Not tuned away:** two ambiguous intent labels, and one banking-info scam listing scored medium, not high. Changing weights until an 8-case set passes would be overfitting; the README reports them as failures.
+
+**Escaping trap, for next time:** patching files through `node -e "…"` or unquoted heredocs silently turned `\b` into backspace bytes and `\n` into real newlines inside regexes and strings, three times this session. Anything with backslashes goes through the Edit tool or a quoted heredoc (`<<'EOF'`), and a control-character scan over the tracked files now comes back clean.

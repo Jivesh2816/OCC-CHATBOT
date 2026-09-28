@@ -46,6 +46,11 @@ test('model signals are kept only when their quote really appears in the listing
   assert.deepEqual(result.signals[0].detectedBy.sort(), ['model', 'rules']);
 });
 
+test('"before a viewing" only counts as pay-before-viewing when money is involved', () => {
+  assert.deepEqual(detectWithRules('Before we book a viewing, tell me a bit about yourself.').map(h => h.signalId), []);
+  assert.deepEqual(detectWithRules('Please send the deposit before the viewing.').map(h => h.signalId), ['pay_before_viewing']);
+});
+
 test('rule detection quotes the sentence that triggered it', () => {
   const [hit] = detectWithRules('Great place. Payment in bitcoin only. Thanks.');
   assert.equal(hit.signalId, 'untraceable_payment');

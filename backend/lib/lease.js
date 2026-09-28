@@ -118,7 +118,9 @@ const RULES = [
     patterns: [
       /\b(security|rent|last month'?s?( rent)?)\s+deposit\b/i,
       /\bdeposit of\b/i
-    ]
+    ],
+    // A refundable key deposit is its own lawful thing (covered by prohibited_fees if non-refundable).
+    exclude: /\bkey deposit\b/i
   },
   {
     id: 'shared_with_owner',
@@ -160,12 +162,13 @@ function splitClauses(text) {
     const sentences = block.split(/(?<=[.;])\s+(?=[A-Z0-9(•-])/);
     for (let sentence of sentences) {
       sentence = sentence.trim();
-      if (sentence.length < 12) continue;
+      // Short clauses matter: "No pets." is 8 characters.
+      if (sentence.length < 5) continue;
       while (sentence.length > MAX_CLAUSE_CHARS) {
         clauses.push(sentence.slice(0, MAX_CLAUSE_CHARS));
         sentence = sentence.slice(MAX_CLAUSE_CHARS);
       }
-      if (sentence.length >= 12) clauses.push(sentence);
+      if (sentence.length >= 5) clauses.push(sentence);
     }
   }
   return clauses;
