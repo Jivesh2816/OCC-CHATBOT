@@ -52,7 +52,7 @@ More detail, including the API, data model, and design decisions: [HOW_IT_WORKS.
 
 ## Tech stack
 
-**Backend:** Node.js 22 · Express · Groq SDK (`openai/gpt-oss-20b`), with no agent framework: the tool loop is wired directly against the chat-completions API · SQLite via `node:sqlite` locally or Turso/libSQL when hosted · BM25 retrieval (hand-written) · `unpdf` for PDF text · Nodemailer (mock transport).
+**Backend:** Node.js 22 · Express · Groq SDK (`openai/gpt-oss-120b`), with no agent framework: the tool loop is wired directly against the chat-completions API · SQLite via `node:sqlite` locally or Turso/libSQL when hosted · BM25 retrieval (hand-written) · `unpdf` for PDF text · Nodemailer (mock transport).
 
 **Frontend:** React 18 · Vite · Tailwind CSS v4 · Radix primitives · GSAP · Vanta.js · react-markdown.
 

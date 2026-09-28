@@ -57,7 +57,7 @@ async function classifyIntent(message, history = []) {
         ],
         model: MODEL,
         temperature: attempt === 0 ? 0 : 0.4,
-        // gpt-oss-20b spends some of its budget on hidden reasoning tokens
+        // gpt-oss spends some of its budget on hidden reasoning tokens
         // before emitting the JSON; 100 was too tight and truncated mid-object
         // often enough to show up as spurious null intents in the eval run.
         max_tokens: 300,

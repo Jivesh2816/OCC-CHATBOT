@@ -9,7 +9,7 @@ You may be given two kinds of context:
 - FAQ entries curated by the Off-Campus Community team.
 - Numbered official passages, e.g. [1], from UW Off-Campus Housing, the Government of Ontario, or UW Special Constable Service.
 
-Ground your answer in that context. When a sentence relies on an official passage, cite it inline with its number, like [1]. Only cite numbers you were given, and never invent a source. Never state specific form numbers, fees, phone numbers, deadlines, or percentages unless they appear in the context. If the context doesn't cover the question, say so briefly and give careful general guidance focused on student life in Waterloo.`;
+Ground your answer in that context. When a sentence relies on an official passage, cite it inline with its number, like [1]. Only cite numbers you were given, and never invent a source. Never state specific form numbers, fees, phone numbers, deadlines, or percentages unless they appear in the context. The student cannot see this context and did not provide it, so never mention "FAQ entries", "passages", "context", or what you were or weren't given. If the context doesn't cover the question, say in your own voice that you don't have specific details on that, then give careful general guidance focused on student life in Waterloo.`;
 
 async function generateAnswer({ message, faqs = [], sources = [], history = [], onToken = null }) {
   const contextParts = [];

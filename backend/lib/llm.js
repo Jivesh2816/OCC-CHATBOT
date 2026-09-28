@@ -3,7 +3,7 @@ const Groq = require('groq-sdk');
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY
 });
-const MODEL = 'openai/gpt-oss-20b';
+const MODEL = 'openai/gpt-oss-120b';
 
 // JSON-mode completion used by the lease and listing checkers.
 async function completeJSON(system, user) {

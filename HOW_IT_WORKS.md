@@ -1,6 +1,6 @@
 # OCC Chatbot — How It Works
 
-An Express API (`backend/`) and a React + Vite frontend (`frontend/`), deployed as two Vercel projects. All LLM calls go to Groq's `openai/gpt-oss-20b` through the Groq SDK, with no agent framework.
+An Express API (`backend/`) and a React + Vite frontend (`frontend/`), deployed as two Vercel projects. All LLM calls go to Groq's `openai/gpt-oss-120b` through the Groq SDK, with no agent framework.
 
 ## Layout
 
@@ -108,7 +108,7 @@ Messages and critic decisions can contain crisis text, so they're deleted after 
 
 On Vercel, `trust proxy` is enabled so `req.ip` is the real client from `X-Forwarded-For`. It stays off locally, where that header could be spoofed. The counters live in memory, which on serverless means per instance, so this caps abuse rather than enforcing an exact global quota.
 
-The underlying constraint is Groq's free tier, shared by all users: **8,000 tokens per minute and 200,000 tokens per day** for `gpt-oss-20b`. A chat message costs 2–3 calls: router and answer, plus the action agent only when the router flags an incident. So the deployment serves only a few messages a minute, and a heavy day of testing can exhaust the daily budget; that happened once during development. When Groq returns 429, the app degrades rather than failing:
+The underlying constraint is Groq's free tier, shared by all users: **8,000 tokens per minute and 200,000 tokens per day** for `gpt-oss-120b`. A chat message costs 2–3 calls: router and answer, plus the action agent only when the router flags an incident. So the deployment serves only a few messages a minute, and a heavy day of testing can exhaust the daily budget; that happened once during development. When Groq returns 429, the app degrades rather than failing:
 - Retrieval serves an FAQ answer or a keyword reply, and the UI says the model was unavailable.
 - The Lease and Scam checkers fall back to their rule-based detectors.
 - Crisis handling doesn't depend on the model at all: the phrase pre-check and the critic still open and escalate a ticket.
