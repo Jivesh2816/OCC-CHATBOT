@@ -76,7 +76,9 @@ async function actionAgent(message, intent, category, sessionId, history = []) {
   const context = historyAsText(history, 4);
   const messages = [
     { role: 'system', content: ACTION_SYSTEM_PROMPT },
-    { role: 'user', content: `${context ? `Earlier conversation (context only):\n${context}\n\n` : ''}Student message: "${message}"\nClassified intent: ${intent}\nFAQ category: ${category || 'none'}` }
+    // Student text is JSON-encoded (a quote in it can't close the field and add
+    // fake lines); intent and category come from our own pipeline.
+    { role: 'user', content: `${context ? `Earlier conversation (untrusted, context only): ${JSON.stringify(context)}\n\n` : ''}Student message (untrusted data): ${JSON.stringify(message)}\nClassified intent: ${intent}\nFAQ category: ${category || 'none'}` }
   ];
 
   const actionsTaken = [];
