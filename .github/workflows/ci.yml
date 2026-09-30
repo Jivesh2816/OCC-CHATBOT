@@ -5,9 +5,12 @@ on:
     branches: [master]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   backend:
-    name: Backend tests
+    name: Backend tests + deterministic eval
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -20,9 +23,23 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
-      # Unit tests only: they need no API key, network, or database server.
-      # The model-backed eval (npm run eval) is run by hand against a live backend.
+      # Unit, pipeline and API tests. The model is a scripted fake and the
+      # database is in-memory: no API key, network, or database server needed.
       - run: npm test
+      # Deterministic eval (retrieval + rule-based safety layer, ~320 labeled
+      # cases, no model calls), then a regression check against the committed
+      # baseline in eval/baselines/offline.json. Fails on any safety regression
+      # or net retrieval loss; see eval/thresholds.json for the reasoning.
+      - run: npm run eval:check
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-eval-report
+          path: |
+            backend/eval/results/offline/eval-report.md
+            backend/eval/results/offline/eval-results.json
+          if-no-files-found: ignore
 
   frontend:
     name: Frontend build
