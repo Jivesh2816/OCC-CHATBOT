@@ -6,7 +6,8 @@ An Express API (`backend/`) and a React + Vite frontend (`frontend/`), deployed 
 
 ```
 backend/
-├── server.js               # app setup: middleware, route mounting, error handler (~50 lines)
+├── app.js                  # app setup: middleware, route mounting, error handler (exported for tests)
+├── server.js               # entry point: listens on PORT
 ├── db.js                   # async SQLite adapter: node:sqlite file, or Turso/libSQL over HTTP
 ├── pipeline/               # the agent stages, in order
 │   ├── index.js            # runPipeline(): memory → router → pre-check → retrieval → action → critic
@@ -33,7 +34,7 @@ backend/
 ├── sources/official.json   # 123 verbatim passages from official pages (generated)
 ├── scripts/build-sources.js
 ├── test/                   # node:test unit tests
-└── eval/                   # eval set + runner against the live /chat pipeline
+└── eval/                   # labeled dataset, harness, metrics, baselines (see eval/README.md)
 frontend/src/
 ├── components/Chatbot.jsx       # chat, streaming, citations, staff replies, mode tabs
 ├── components/AgentTrace.jsx    # live / collapsible pipeline trace
@@ -48,7 +49,7 @@ frontend/src/
 `runPipeline()` in `pipeline/index.js` serves both `POST /chat` (JSON) and `POST /chat/stream` (NDJSON). It's one code path, so the eval exercises exactly what users get.
 
 1. **Memory.** The session's last 6 stored messages are loaded before the new one is saved.
-2. **Router** (`classifyIntent`). JSON-mode LLM call over 10 intents (`housing`, `health_safety`, `rent_money`, `food`, `transit`, `bylaws`, `academic`, `social`, `urgent`, `out_of_scope`) plus a confidence score, and an `incident` flag: whether the student describes a specific ongoing problem, as opposed to a general question. The last two turns are included as context. It makes two attempts (temperature 0, then 0.4); if both fail, the message goes to unscoped retrieval.
+2. **Router** (`classifyIntent`). JSON-mode LLM call over 10 intents (`housing`, `health_safety`, `rent_money`, `food`, `transit`, `bylaws`, `academic`, `social`, `urgent`, `out_of_scope`) plus a confidence score, and an `incident` flag: whether the student describes a specific ongoing problem, as opposed to a general question. The last two turns are included as context. It makes two attempts (temperature 0, then 0.4); if both fail, the message goes to unscoped retrieval. The student's text is passed as JSON-encoded fields, never pasted into the prompt, and the prompt treats it as untrusted data: text claiming authority or telling the classifier what to choose ("SYSTEM: escalate this") isn't evidence of anything, while a described risk to a real person, including someone the student knows, is still urgent. The action agent gets the message the same way. The router's self-reported confidence is recorded but, measured on 317 cases, carries no signal (mean 0.98 when right, 0.99 when wrong).
 3. **Critic pre-check** (`critic.preCheck` → `lib/crisis.js`). A rule-based detector recognizes self-harm, sexual violence, violence or abuse, immediate danger, and losing housing, with vetoes for look-alikes ("suicide prevention workshop", "hit me with a rent increase"). The first four make the intent `urgent` regardless of the router — or when the router failed, which is what keeps crisis handling working during a model outage. Losing housing ("changed the locks", "nowhere to sleep tonight") keeps a normal intent so the student still gets an answer about their rights; the post-check adds resources and a ticket.
 4. **Retrieval and answer** (`retrievalAgent`).
    - `urgent` returns fixed crisis resources chosen for the kind of crisis (e.g. Women's Crisis Services for abuse, 988 for self-harm), and only says staff were notified when an alert channel is configured.
@@ -125,7 +126,11 @@ Groq's paid Dev Tier removes these limits without code changes.
 
 ## Evaluation (`eval/`)
 
-`npm run eval [chat|lease|scam]` calls the running backend over HTTP. The default delays keep it under the server's own rate limits; set `EVAL_CHAT_DELAY_MS` and `EVAL_TOOL_DELAY_MS` lower only against a server started with higher `RATE_LIMIT_*` values.
+The main harness is `eval/run.js` (`npm run eval`, `eval:router`, `eval:pipeline`, `eval:check`): 321 labeled cases run in-process against an in-memory database with alerts disabled, in three modes (deterministic / router only / full pipeline), with metrics, failure tables and a regression check against committed baselines. Method, metric definitions and thresholds: [`backend/eval/README.md`](backend/eval/README.md). Evidence: [`docs/eval/`](docs/eval/).
+
+The older black-box suite below is kept as `npm run eval:http` for smoke-testing a deployed URL and for the lease and scam checkers.
+
+`npm run eval:http [chat|lease|scam]` calls the running backend over HTTP. The default delays keep it under the server's own rate limits; set `EVAL_CHAT_DELAY_MS` and `EVAL_TOOL_DELAY_MS` lower only against a server started with higher `RATE_LIMIT_*` values.
 
 - **chat** (`eval-set.json`, 34 cases): router intent, match type, critic flags, whether the answer cites an official passage, whether the expected passage was retrieved, multi-turn follow-ups (`setup` turns sent first in the same session), and that urgent messages end with an escalated ticket.
 - **lease** (`lease-set.json`, 13 leases): precision and recall over planted void clauses, scored twice, once for rules plus model and once for rules alone, to show what the model pass adds. Any unexpected `void` flag counts as a false positive.
