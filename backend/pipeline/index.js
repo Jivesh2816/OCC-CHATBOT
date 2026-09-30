@@ -129,7 +129,7 @@ async function runPipeline({ message, sessionId: incomingSessionId, emit = () =>
     let retrieved = null;
     const result = await stage(
       'retrieval',
-      () => retrievalAgent(message, intent, { history, onToken, onRetrieved: r => { retrieved = r; emit({ type: 'retrieved', ...r }); } }),
+      () => retrievalAgent(message, intent, { history, crisis, onToken, onRetrieved: r => { retrieved = r; emit({ type: 'retrieved', ...r }); } }),
       r => ({ faqs: retrieved?.faqs || [], sources: retrieved?.sources || [], matchType: r.matchType, groqFailed: r.metadata?.error === 'groq_failed' })
     );
     botResponse = result.response;

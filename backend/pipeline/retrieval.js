@@ -67,22 +67,33 @@ async function generateAnswer({ message, faqs = [], sources = [], history = [], 
 // FAQ match, then to the keyword responder.
 // ---------------------------------------------------------------------------
 
+// Students describe losing their housing in their own words ("nowhere to sleep",
+// "changed the locks"); the official pages say "unhoused", "temporary places to
+// stay", "eviction order". When the crisis detector has already recognised a
+// housing emergency, search in the pages' vocabulary too, so the answer can
+// cite the urgent-housing and eviction-rules passages. The eval showed these
+// were retrieved for 1 of 8 housing emergencies without this.
+const HOUSING_EMERGENCY_TERMS = 'urgent housing unhoused temporary short term accommodation place to stay eviction evict order';
+
 // The retrieval step on its own: scored FAQ and official-passage hits for a
 // message, given the router's intent. Pure and model-free, so the eval can
 // score exactly what the pipeline retrieves (at any depth) without an LLM.
-function retrieve(message, intent, history = [], { faqTopN = 3, sourceTopN = 3 } = {}) {
+function retrieve(message, intent, history = [], { faqTopN = 3, sourceTopN = 3, crisis = null } = {}) {
   const scopedCategory = intent ? INTENT_CATEGORY_MAP[intent] : null;
-  const query = contextualQuery(message, history);
+  const baseQuery = contextualQuery(message, history);
+  const query = crisis?.id === 'housing_emergency' ? `${baseQuery} ${HOUSING_EMERGENCY_TERMS}` : baseQuery;
 
   let faqs = scoredFAQs(message, { topN: faqTopN, category: scopedCategory });
   if (faqs.length === 0 && query !== message) faqs = scoredFAQs(query, { topN: faqTopN, category: scopedCategory });
   const sources = scoredOfficialSources(query, intent, { topN: sourceTopN });
-  return { scopedCategory, query, faqs, sources };
+  return { scopedCategory, baseQuery, query, faqs, sources };
 }
 
-async function retrievalAgent(message, intent, { history = [], onToken = null, onRetrieved = null } = {}) {
-  const retrieved = retrieve(message, intent, history);
-  const { scopedCategory, query } = retrieved;
+async function retrievalAgent(message, intent, { history = [], crisis = null, onToken = null, onRetrieved = null } = {}) {
+  const retrieved = retrieve(message, intent, history, { crisis });
+  // The verbatim-FAQ fallback below uses the student's own words, not the
+  // expanded query: an FAQ served as-is has to match what they actually asked.
+  const { scopedCategory, baseQuery: query } = retrieved;
   const relevantFAQs = retrieved.faqs.map(r => r.doc);
   const sources = retrieved.sources.map(r => r.doc);
   console.log('Retrieval agent found', relevantFAQs.length, 'FAQs and', sources.length, 'official passages', scopedCategory ? `(scoped to ${scopedCategory})` : '(unscoped)');
