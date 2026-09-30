@@ -78,14 +78,16 @@ const HOUSING_EMERGENCY_TERMS = 'urgent housing unhoused temporary short term ac
 // The retrieval step on its own: scored FAQ and official-passage hits for a
 // message, given the router's intent. Pure and model-free, so the eval can
 // score exactly what the pipeline retrieves (at any depth) without an LLM.
-function retrieve(message, intent, history = [], { faqTopN = 3, sourceTopN = 3, crisis = null } = {}) {
+// faqMinScore / sourceMinScore override the production cut-offs (eval sweeps only).
+function retrieve(message, intent, history = [], { faqTopN = 3, sourceTopN = 3, crisis = null, faqMinScore, sourceMinScore } = {}) {
   const scopedCategory = intent ? INTENT_CATEGORY_MAP[intent] : null;
   const baseQuery = contextualQuery(message, history);
   const query = crisis?.id === 'housing_emergency' ? `${baseQuery} ${HOUSING_EMERGENCY_TERMS}` : baseQuery;
 
-  let faqs = scoredFAQs(message, { topN: faqTopN, category: scopedCategory });
-  if (faqs.length === 0 && query !== message) faqs = scoredFAQs(query, { topN: faqTopN, category: scopedCategory });
-  const sources = scoredOfficialSources(query, intent, { topN: sourceTopN });
+  const faqOpts = { topN: faqTopN, category: scopedCategory, ...(faqMinScore !== undefined && { minScore: faqMinScore }) };
+  let faqs = scoredFAQs(message, faqOpts);
+  if (faqs.length === 0 && query !== message) faqs = scoredFAQs(query, faqOpts);
+  const sources = scoredOfficialSources(query, intent, { topN: sourceTopN, ...(sourceMinScore !== undefined && { minScore: sourceMinScore }) });
   return { scopedCategory, baseQuery, query, faqs, sources };
 }
 
