@@ -25,6 +25,15 @@ test('a verbatim fallback answer needs a clearer match than model context does',
   assert.equal(searchFAQ("My landlord won't fix maintenance issues", 'Housing & Leases')?.question, "My landlord won't fix maintenance issues");
 });
 
+test('the no-model fallback points to the office for the topic asked about', () => {
+  // These regexes once began with a literal backspace byte instead of \b, so
+  // every student got the housing pointer during an outage.
+  assert.match(getIntelligentResponse('where can I get food'), /wusa\.ca/);
+  assert.match(getIntelligentResponse('is the bus running'), /grt\.ca/);
+  assert.match(getIntelligentResponse('I feel anxious'), /Good2Talk/);
+  assert.match(getIntelligentResponse('my landlord kept my deposit'), /renting-ontario-your-rights/);
+});
+
 test('the no-model fallback says no answer was generated and always carries crisis numbers', () => {
   for (const message of ['hello', 'my boyfriend hits me', 'where can I eat']) {
     const reply = getIntelligentResponse(message);

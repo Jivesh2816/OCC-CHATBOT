@@ -95,10 +95,10 @@ function topicCounts() {
 function getIntelligentResponse(message) {
   const q = String(message || '').toLowerCase();
   let pointer = 'For housing and off-campus questions, the UW Off-Campus Housing website (uwaterloo.ca/off-campus-housing) is the best place to start.';
-  if (/(lease|landlord|rent|tenant|evict|deposit|sublet)/.test(q)) pointer = 'For leases and tenant rights, see uwaterloo.ca/off-campus-housing or ontario.ca/page/renting-ontario-your-rights.';
-  else if (/(food|meal|eat|grocer|hungry)/.test(q)) pointer = 'For food support, WUSA runs food programs for students — see wusa.ca.';
-  else if (/(bus|ion|grt|transit|u-?pass)/.test(q)) pointer = 'For transit, see grt.ca; your WatCard works as your U-Pass.';
-  else if (/(health|doctor|clinic|counsel|mental|anxious|depress|stress)/.test(q)) pointer = 'For health and counselling, see UW Campus Wellness (uwaterloo.ca/campus-wellness), or Good2Talk at 1-866-925-5454 (24/7).';
+  if (/\b(lease|landlord|rent|tenant|evict|deposit|sublet)/.test(q)) pointer = 'For leases and tenant rights, see uwaterloo.ca/off-campus-housing or ontario.ca/page/renting-ontario-your-rights.';
+  else if (/\b(food|meal|eat|grocer|hungry)/.test(q)) pointer = 'For food support, WUSA runs food programs for students — see wusa.ca.';
+  else if (/\b(bus|ion|grt|transit|u-?pass)/.test(q)) pointer = 'For transit, see grt.ca; your WatCard works as your U-Pass.';
+  else if (/\b(health|doctor|clinic|counsel|mental|anxious|depress|stress)/.test(q)) pointer = 'For health and counselling, see UW Campus Wellness (uwaterloo.ca/campus-wellness), or Good2Talk at 1-866-925-5454 (24/7).';
   return `I can't generate an answer right now — the AI model is temporarily unavailable. Please try again in a few minutes.
 
 ${pointer}${SAFETY_FOOTER}`;
