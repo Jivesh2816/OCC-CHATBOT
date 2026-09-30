@@ -1,7 +1,7 @@
 const { groq, MODEL } = require('../lib/llm');
 const { historyAsChat, contextualQuery } = require('./memory');
 const { INTENT_CATEGORY_MAP } = require('./router');
-const { searchFAQ, getIntelligentResponse, findRelevantFAQs, findOfficialSources, normalizeCitations, toCitations } = require('../lib/knowledge');
+const { searchFAQ, getIntelligentResponse, scoredFAQs, scoredOfficialSources, normalizeCitations, toCitations } = require('../lib/knowledge');
 
 const ANSWER_SYSTEM_PROMPT = `You are a helpful assistant for University of Waterloo off-campus students. Be friendly, empathetic, practical, and concise.
 
@@ -67,15 +67,32 @@ async function generateAnswer({ message, faqs = [], sources = [], history = [], 
 // FAQ match, then to the keyword responder.
 // ---------------------------------------------------------------------------
 
-async function retrievalAgent(message, intent, { history = [], onToken = null, onRetrieved = null } = {}) {
+// The retrieval step on its own: scored FAQ and official-passage hits for a
+// message, given the router's intent. Pure and model-free, so the eval can
+// score exactly what the pipeline retrieves (at any depth) without an LLM.
+function retrieve(message, intent, history = [], { faqTopN = 3, sourceTopN = 3 } = {}) {
   const scopedCategory = intent ? INTENT_CATEGORY_MAP[intent] : null;
   const query = contextualQuery(message, history);
 
-  let relevantFAQs = findRelevantFAQs(message, 3, scopedCategory);
-  if (relevantFAQs.length === 0 && query !== message) relevantFAQs = findRelevantFAQs(query, 3, scopedCategory);
-  const sources = findOfficialSources(query, intent);
+  let faqs = scoredFAQs(message, { topN: faqTopN, category: scopedCategory });
+  if (faqs.length === 0 && query !== message) faqs = scoredFAQs(query, { topN: faqTopN, category: scopedCategory });
+  const sources = scoredOfficialSources(query, intent, { topN: sourceTopN });
+  return { scopedCategory, query, faqs, sources };
+}
+
+async function retrievalAgent(message, intent, { history = [], onToken = null, onRetrieved = null } = {}) {
+  const retrieved = retrieve(message, intent, history);
+  const { scopedCategory, query } = retrieved;
+  const relevantFAQs = retrieved.faqs.map(r => r.doc);
+  const sources = retrieved.sources.map(r => r.doc);
   console.log('Retrieval agent found', relevantFAQs.length, 'FAQs and', sources.length, 'official passages', scopedCategory ? `(scoped to ${scopedCategory})` : '(unscoped)');
-  onRetrieved?.({ faqs: relevantFAQs.map(f => f.question), sources: sources.map(s => ({ id: s.id, title: s.heading, publisher: s.publisher })) });
+  onRetrieved?.({
+    faqs: relevantFAQs.map(f => f.question),
+    faqIds: relevantFAQs.map(f => f.id),
+    sources: sources.map(s => ({ id: s.id, title: s.heading, publisher: s.publisher })),
+    // BM25 scores, for the request log and the eval (the UI doesn't display them).
+    scores: { faqs: retrieved.faqs.map(r => +r.score.toFixed(2)), sources: retrieved.sources.map(r => +r.score.toFixed(2)) }
+  });
 
   const generated = normalizeCitations(await generateAnswer({ message, faqs: relevantFAQs, sources, history, onToken }));
   if (generated) {
@@ -126,4 +143,4 @@ async function retrievalAgent(message, intent, { history = [], onToken = null, o
   };
 }
 
-module.exports = { generateAnswer, retrievalAgent };
+module.exports = { generateAnswer, retrieve, retrievalAgent };

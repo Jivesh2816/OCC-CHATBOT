@@ -111,10 +111,14 @@ function findRelevantFAQs(question, topN = 3, category = null) {
   return scoredFAQs(question, { topN, category }).map(r => r.doc);
 }
 
-// Official passages relevant to the question, ranked by BM25.
-function findOfficialSources(query, intent, topN = 3) {
+// Official passages relevant to the question, ranked by BM25, as { doc, score }.
+function scoredOfficialSources(query, intent, { topN = 3, minScore = SOURCE_MIN_SCORE } = {}) {
   if (!SOURCE_INTENTS.has(intent)) return [];
-  return sourceIndex.search(expandQuery(query), { topN, minScore: SOURCE_MIN_SCORE }).map(r => r.doc);
+  return sourceIndex.search(expandQuery(query), { topN, minScore });
+}
+
+function findOfficialSources(query, intent, topN = 3) {
+  return scoredOfficialSources(query, intent, { topN }).map(r => r.doc);
 }
 
 // gpt-oss often writes citations as 【1】 or 【1†source】 — normalize to [1].
@@ -135,6 +139,7 @@ function toCitations(sources, answer) {
 }
 
 module.exports = {
+  allFAQs,
   faqCount: () => (Array.isArray(faqData) ? faqData.length : 0),
   officialSources,
   sourcesById,
@@ -143,6 +148,13 @@ module.exports = {
   getIntelligentResponse,
   findRelevantFAQs,
   findOfficialSources,
+  // Scored forms of the two lookups, for the eval and the request log.
+  scoredFAQs,
+  scoredOfficialSources,
+  expandQuery,
+  SOURCE_INTENTS,
+  FAQ_MIN_SCORE,
+  SOURCE_MIN_SCORE,
   normalizeCitations,
   toCitations
 };
