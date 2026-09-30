@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const { topicCounts, faqCount, officialSources } = require('../lib/knowledge');
 const { runPipeline } = require('../pipeline');
@@ -6,6 +7,14 @@ const { alertChannels } = require('../lib/alerts');
 const { isSessionId, parseChatMessage } = require('../lib/validate');
 
 const router = express.Router();
+
+// A request id ties the response (X-Request-Id) to its structured log line,
+// so a reported problem can be traced without anyone sharing message text.
+function withRequestId(res) {
+  const requestId = crypto.randomUUID();
+  res.setHeader('X-Request-Id', requestId);
+  return requestId;
+}
 
 router.get('/', (req, res) => {
   res.json({ message: 'Chatbot API is running!' });
@@ -23,14 +32,15 @@ router.get('/topics', (req, res) => {
 });
 
 router.post('/chat', chatLimits, async (req, res) => {
+  const requestId = withRequestId(res);
   try {
     const { message, error } = parseChatMessage(req.body);
     if (error) return res.status(400).json({ error });
     // An id we didn't mint (or a malformed one) starts a fresh session.
     const sessionId = isSessionId(req.body.sessionId) ? req.body.sessionId : undefined;
-    res.json(await runPipeline({ message, sessionId }));
+    res.json(await runPipeline({ message, sessionId, requestId }));
   } catch (error) {
-    console.error('Error processing chat:', error);
+    console.error(JSON.stringify({ event: 'chat_error', requestId, error: error?.message || String(error) }));
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -39,6 +49,7 @@ router.post('/chat', chatLimits, async (req, res) => {
 // each stage starts/finishes → answer tokens → a final "done" with the full
 // payload (which includes any critic edits to the streamed text).
 router.post('/chat/stream', chatLimits, async (req, res) => {
+  const requestId = withRequestId(res);
   const { message, error } = parseChatMessage(req.body);
   if (error) return res.status(400).json({ error });
   const sessionId = isSessionId(req.body.sessionId) ? req.body.sessionId : undefined;
@@ -53,10 +64,10 @@ router.post('/chat/stream', chatLimits, async (req, res) => {
   };
 
   try {
-    const payload = await runPipeline({ message, sessionId, emit });
+    const payload = await runPipeline({ message, sessionId, emit, requestId });
     emit({ type: 'done', payload });
   } catch (error) {
-    console.error('Error processing streamed chat:', error);
+    console.error(JSON.stringify({ event: 'chat_error', requestId, stream: true, error: error?.message || String(error) }));
     emit({ type: 'error', error: 'Internal server error' });
   }
   res.end();
