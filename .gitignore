@@ -8,8 +8,10 @@ node_modules/
 *.sqlite-wal
 *.sqlite-shm
 
-# Eval run output (Stage 6) — regenerated each run, not source
+# Eval run output — regenerated each run, not source. Results that back a
+# documented claim are copied to docs/eval/ and committed there.
 backend/eval/eval-results.json
+backend/eval/results/
 
 # Environment variables
 .env
@@ -99,3 +101,4 @@ Thumbs.db
 # Build outputs
 build/
 dist/
+backend/eval/cache/
