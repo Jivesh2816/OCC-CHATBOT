@@ -48,8 +48,21 @@ Dataset v2: 387 cases (66 added: 22 tool-calling, 22 trust-boundary, 22 "no answ
 | `experiment-threshold-sweep` | offline | dev + fresh | n/a | `node eval/experiments/threshold-sweep.js`: no cut-off pair keeps false matches ≤ 10%; current cut-offs kept |
 | `experiment-dense-retrieval-v2` | offline A/B | 236 labeled cases | n/a | ranking results reproduce round 1; abstention AUC: BM25 0.86, dense 0.78–0.82 |
 | `offline-all-v2` | offline | all 387 | n/a | the current CI baseline (`npm run eval`) |
-| `agent-tools-partial` | agent (live, cached) | **6 of 37** tool cases | n/a | stopped by the daily token quota. **Not a measurement.** Complete it with `npm run eval:agent -- --category tool_incident,tool_no_action --resume` |
+| `agent-tools-partial` | agent (live, cached) | **6 of 37** tool cases | n/a | **Superseded by `agent-baseline`; do not cite.** Stopped by the daily token quota, and one of its 6 cases (`tool-wellness-reach-out`) is invalid: a 429 interrupted the agent's tool loop after turn 1 and a harness bug (fixed in `928c6c5`) cached the partial result as complete (DEV_NOTES, 2026-10-02). |
 
 **`pipeline-sample` caveats.** Four cases is a plumbing check, not a benchmark: don't quote its accuracy figures. Its end-to-end and per-stage timings are also **invalid**. They were recorded before a harness fix, and they include the harness's own rate-limit pacing waits (the pacer sleeps inside the model call). The per-call LLM latencies and token counts in it are valid: those are timed after the pacer.
 
 Replays reuse the recorded router decisions and re-run everything deterministic with the current code; they refuse to run if the router prompt or model changed (fingerprint `17a62ecd151a`).
+
+## Round 3 (2026-10-02/03): frozen baselines
+
+Measured before any change informed by them. Both folders include the exact cache the run read (`cache/*.jsonl`), so the reports can be regenerated offline, with no API calls, from the code at commit `928c6c5` (agent and pipeline code identical to `12a7d67`):
+
+`EVAL_CACHE_DIR=../docs/eval/<folder>/cache node eval/run.js <args> --cached-only --out <dir>` (from `backend/`)
+
+| Folder | Mode | Cases | Command | Headline |
+|---|---|---|---|---|
+| `pipeline-fresh-baseline` | pipeline (live) | fresh, 70 of 70 | `npm run eval:pipeline -- --split fresh --resume` | escalation recall 95.0%, precision 76.0%, FPR 17.6% (hard negatives 38.5%); agent tool selection 92.0% (n=50); end-to-end p50 3.6 s / p95 14.4 s |
+| `agent-baseline` | agent (live) | tool_incident + tool_no_action, 37 of 37 (dev 15, fresh 22) | `npm run eval:agent -- --category tool_incident,tool_no_action --resume` | tool-selection accuracy 81.1% (dev 66.7%, fresh 90.9%); no-tool 11/11; escalate precision 45%; ticket-only cases escalated 6/11 (dev 5/5, fresh 1/6) |
+
+The agent baseline's 37 cases come from two quota windows: 5 cached from 2026-09-30, 32 run 2026-10-03 after the two invalidated entries were removed (DEV_NOTES, 2026-10-02).

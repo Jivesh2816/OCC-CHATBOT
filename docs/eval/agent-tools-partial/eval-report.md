@@ -1,3 +1,5 @@
+> **SUPERSEDED — do not cite.** This partial run (6 of 37 cases, stopped by the daily token quota) is not a measurement, and one of its 6 cases, `tool-wellness-reach-out`, is invalid: a Groq 429 interrupted the agent's tool loop after its first turn, and a harness bug (fixed in `928c6c5`) cached and scored the partial result. The complete baseline is [`../agent-baseline/`](../agent-baseline/eval-report.md).
+
 # Eval report: agent (tools-partial)
 
 |  |  |
