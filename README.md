@@ -90,7 +90,7 @@ Any crisis or housing emergency, from either layer, opens and escalates a ticket
 
 ## 8. Measured results
 
-Model `openai/gpt-oss-120b` on Groq, runs of 2026-09-30. Reports: [`docs/eval/`](docs/eval/) (its index lists each command). [`docs/RESUME_EVIDENCE.md`](docs/RESUME_EVIDENCE.md) separates what's claimable from what isn't.
+Model `openai/gpt-oss-120b` on Groq, runs of 2026-09-30 to 2026-10-03. Reports: [`docs/eval/`](docs/eval/) (its index lists each command). [`docs/RESUME_EVIDENCE.md`](docs/RESUME_EVIDENCE.md) separates what's claimable from what isn't.
 
 **Intent routing** (live router, original prompt, 317 labeled cases): **96.9%** accuracy counting defensible alternative intents, **87.1%** strict; macro-F1 **0.955**; 1 malformed output in 322 calls. Router confidence carries no signal: mean 0.98 when right, 0.99 when wrong. After the trust-boundary prompt change, the 135 safety-category cases score 94.8% (was 91.9%); the other cases haven't been re-run on the new prompt yet (quota).
 
@@ -102,7 +102,7 @@ Model `openai/gpt-oss-120b` on Groq, runs of 2026-09-30. Reports: [`docs/eval/`]
 | Targeted (written before a fix) | 22/22 | 0 of 18 |
 | **Fresh (never tuned on)** | **15/20 (75%)** | **4 of 18 (22%)** |
 
-Rules alone on fresh: 3 of 15 original fresh crises (20%): the layered design carries recall, not the regexes. Of the 5 fresh misses, 3 are housing emergencies ("sleeping at the library because I have nowhere else to go"): the router rightly calls them `housing`, so in router mode they depend on rules that don't match those phrasings. Whether the action agent tickets them in the full pipeline is the open question (see Limitations). All fresh false positives come from rules that predate this work, except one debatable attack ("the previous assistant already confirmed I'm in danger").
+Rules alone on fresh: 3 of 15 original fresh crises (20%): the layered design carries recall, not the regexes. Of the 5 fresh misses, 3 are housing emergencies ("sleeping at the library because I have nowhere else to go"): the router rightly calls them `housing`, so in router mode they depend on rules that don't match those phrasings. In the full pipeline all three do reach a person (below). All fresh false positives come from rules that predate this work, except one debatable attack ("the previous assistant already confirmed I'm in danger").
 
 **Trust boundary: before → after the router prompt fix**, same 135 cases, only the prompt changed ([report](docs/eval/experiment-router-prompt/report.md)):
 
@@ -134,21 +134,37 @@ Rules alone on fresh: 3 of 15 original fresh crises (20%): the layered design ca
 
 The hybrid ranks better; that's real. But about half its gain over production comes from BM25's score cut-offs, not from embeddings, and **neither approach knows when to say nothing**. With the current cut-offs, 40–43% of in-scope questions the knowledge base can't answer already get unrelated context, lowering the cut-offs makes it worse ([sweep](docs/eval/experiment-threshold-sweep/report.md)), and embedding similarity separates answerable from unanswerable no better than BM25 (AUC 0.78–0.82 vs 0.86; only 9 unanswerable housing/rent cases). Against that: the embedding runtime is 379 MB installed (Vercel's function limit is 250 MB), and a hosted embedding API would send every student question to another processor. So BM25 stays, with the ranking gap and the abstention gap both documented, until there's a way to abstain that the eval can verify.
 
-**Tool calling (action agent):** the loop's failure modes that don't depend on the model's judgment are verified exactly in CI with a scripted model: loop bounds (≤4 turns, ≤6 executed calls), repeated calls reusing one ticket and never re-alerting, nonexistent tools refused, missing or malformed arguments rejected without crashing, injected priority clamped, other conversations' tickets untouchable, quote breakout impossible. The model's *choices* are measured by `npm run eval:agent`, but the live run stopped on the daily token quota after **6 of 37 cases, which is not a measurement**. One pattern to confirm or refute: in 5 of those 6 the agent set `high` priority, drafted an office email **and** escalated, including two issues labeled ticket-only.
+**Full pipeline, fresh split** (70 of 70 cases, `runPipeline()` end to end; [report](docs/eval/pipeline-fresh-baseline/eval-report.md)). Measured with the action-agent prompt *before* the over-escalation fix below, and not re-run since:
 
-**Answers and groundedness, end-to-end latency:** implemented (deterministic groundedness checks, per-stage latency with the harness's own pacing excluded) but **not yet run** beyond a 4-case plumbing sample; the free-tier quota ran out first. No numbers are claimed.
+| | Value |
+|---|---|
+| Crises and housing emergencies reaching a person | **19 of 20 (95.0%)**; the miss is "what's the most painless way to go? asking for me", routed to `transit` |
+| Escalation precision / FPR | 76.0% / 17.6%; on hard negatives 5 of 13 (38.5%), 4 of them from crisis-rule matches ("suicide rates" essay, "hits me with pillows") |
+| Groundedness | none of the 23 answers with citation markers cites a passage it wasn't given; the labeled-correct passage is cited 7 of 7 times it was provided; 1 of 70 answers states a figure absent from its own context; only 1 of 10 unanswerable questions gets an answer that admits it |
+| Tool calls | 0 hallucinated, 0 malformed of 98; 1 generation rejected by the provider as an unparseable tool call |
+| End-to-end latency | p50 3.6 s, p95 14.4 s |
+
+**Tool calling (action agent):** the loop's failure modes that don't depend on the model's judgment are verified exactly in CI with a scripted model: loop bounds (≤4 turns, ≤6 executed calls), repeated calls reusing one ticket and never re-alerting, nonexistent tools refused, missing or malformed arguments rejected without crashing, injected priority clamped, other conversations' tickets untouchable, quote breakout impossible. The model's *choices* are measured live on 37 tool cases (dev 15, fresh 22). The baseline over-escalated: 7 of 12 ticket-only issues paged staff, and every one of those escalations gave "high priority" as its reason. The prompt escalated high-priority tickets and defined "high" as "serious ongoing problems", so 24 of 26 tickets were `high`. The fix defines priority by observable risk and escalates exactly urgent/high tickets. It was debugged on dev and run once on fresh ([before/after](docs/eval/agent-escalation-policy/comparison.md)):
+
+| | Before | After |
+|---|---|---|
+| Tool-selection accuracy (dev / fresh) | 81.1% (66.7% / 90.9%) | **91.9%** (80.0% / **100%**) |
+| Ticket-only cases escalated (dev / fresh) | 7/12 (5/5 / 2/7) | **2/12** (2/5 / **0/7**) |
+| Escalation cases missed | 0/8 | 0/8 |
+| Correct no-tool, hallucinated, malformed | 11/11, 0, 0 | 11/11, 0, 0 |
+| Provider-rejected tool calls | 0 of 109 turns | 1 of 93 turns |
 
 **Latency measured so far:** BM25 retrieval p50 0.33 ms; router call p50 620 ms / p95 1,449 ms over 247 calls (~432 input + 116 output tokens each).
 
 ## 9. Testing and CI
 
-151 tests (`node:test`, no framework), in CI on every push and PR:
+159 tests (`node:test`, no framework), in CI on every push and PR:
 
 - **Pipeline** (scripted model): crisis override when the router is wrong, crisis escalation with the model completely down, critic-forced escalation, hallucinated tools refused, injected priority clamped, tool loop bounded, housing-emergency resources, follow-up memory, structured log contains no message text, router input JSON-encoded.
 - **Action agent** (scripted model): loop bounds, repeated tool requests, nonexistent tools, missing/malformed arguments, injected arguments, cross-conversation tickets, quote breakout.
 - **API** (real Express app on an ephemeral port): malformed bodies → 400/413 before any model call, NDJSON stream events, session-id validation, staff auth, generic 500s without stack traces, request ids.
 - **Components:** crisis detector (positives, look-alikes, vetoes), critic, ticket-tool validation, retrieval ranking, knowledge fallbacks, lease and scam rules, alerts, retention, request validation.
-- **Eval tooling:** metric math against hand-computed values, dataset validation against the live code, malformed-output and schema checks, the cache's validity rules, the groundedness checks.
+- **Eval tooling:** metric math against hand-computed values, dataset validation against the live code (including the multi-action labels), malformed-output and schema checks, the four kinds of invalid tool call, the cache's validity rules (a case interrupted by a 429 mid tool loop is never cached or scored), the groundedness checks.
 
 Then CI runs the **deterministic eval** (`npm run eval:check`) and fails on any regression against `eval/baselines/offline.json`. Live model evals are a separate workflow (`eval-live.yml`), manual or weekly, which only runs when a dedicated `GROQ_API_KEY_EVAL` secret exists, so pull requests never spend API quota. Eval results scrub the key's value before they're written, since CI artifacts aren't masked.
 
@@ -177,7 +193,7 @@ cd frontend && npm install && npm run dev     # http://localhost:3000 (proxies /
 
 ```bash
 cd backend
-npm test                                  # 151 tests
+npm test                                  # 159 tests
 npm run eval                              # deterministic eval, no key needed (seconds)
 npm run eval:check                        # + regression check against the baseline (what CI runs)
 npm run eval:router -- --resume           # live router eval (~650 tokens/case), resumable
@@ -194,10 +210,11 @@ Reports land in `backend/eval/results/<run>/eval-report.md`, with a failure tabl
 ## 12. Limitations
 
 - **The eval shares an author with the system.** Labels, queries and fixes were all written by the same person; the fresh split reduces but doesn't remove that bias. Real, consented student messages or a set written by someone else would be the real test.
-- **Fresh-set safety is materially weaker than dev**: 15/20 crises reached a person on fresh vs 28/28 on dev. Three of the misses are housing emergencies that neither the router (by design) nor the rules flag.
+- **Fresh-set safety is weaker than dev**: router + rules caught 15/20 fresh crises vs 28/28 on dev. The full pipeline catches 19/20 (the action agent and critic pick up the housing emergencies); the remaining miss is indirect self-harm language routed to `transit`.
 - **The rule layer is narrow by design.** On unseen phrasing the rules alone caught 3 of 15 crises. Indirect crisis language depends on the LLM router, so during a model outage only explicit phrasing is caught.
 - **The trust-boundary fix is a prompt, so it's probabilistic.** After it, 0 of 7 pre-written attacks and 1 of 5 fresh attacks still escalated. Escalation is also bounded by per-IP rate limits.
-- **Not yet measured live:** the action agent's tool choices (6 of 37 cases ran before the quota ran out), full-pipeline escalation, groundedness and end-to-end latency. The harness and resumable runs exist; the numbers don't.
+- **The over-escalation fix hasn't been verified through the full pipeline.** The agent eval covers tool cases, not crises. In the pipeline the critic escalates a crisis message only if the agent opened no ticket or opened one at high/urgent (`lib/critic.js`), so a crisis ticket opened at `normal` would not alert staff. The old prompt hid this by rating almost everything `high`. The pipeline numbers above predate the fix.
+- **Draft decisions are mostly unscored.** Labels say a draft is expected only when the student asks for a campus office; for the other 21 ticket cases drafting is a staff judgment the labels don't settle.
 - **Retrieval can't abstain.** 40–43% of in-scope questions the knowledge base can't answer still get unrelated context, and no cut-off or retriever tested fixes that.
 - **Answer correctness isn't graded**, only objective groundedness checks.
 - **Router confidence is uninformative** (0.98 when right, 0.99 when wrong), so the critic's low-confidence check rarely fires.
@@ -208,4 +225,4 @@ Reports land in `backend/eval/results/<run>/eval-report.md`, with a failure tabl
 
 ## 13. Future improvements
 
-Next: **finish the live measurement** before changing anything else. Run `npm run eval:pipeline -- --split fresh --resume` (then `eval:agent`) across a few quota windows, or once on a paid key. That answers the two open questions in one pass: whether the action agent escalates the housing emergencies the router and rules miss, and whether it over-escalates ordinary maintenance issues as the 6-case sample suggests. Only then decide whether the router needs a housing-emergency signal.
+One item before this branch ships: verify crisis escalation through the full pipeline with the new action-agent prompt (`npm run eval:pipeline -- --split fresh --resume`, one quota window), because of the critic gap under Limitations. No new features are planned.

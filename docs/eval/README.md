@@ -65,4 +65,8 @@ Measured before any change informed by them. Both folders include the exact cach
 | `pipeline-fresh-baseline` | pipeline (live) | fresh, 70 of 70 | `npm run eval:pipeline -- --split fresh --resume` | escalation recall 95.0%, precision 76.0%, FPR 17.6% (hard negatives 38.5%); agent tool selection 92.0% (n=50); end-to-end p50 3.6 s / p95 14.4 s |
 | `agent-baseline` | agent (live) | tool_incident + tool_no_action, 37 of 37 (dev 15, fresh 22) | `npm run eval:agent -- --category tool_incident,tool_no_action --resume` | tool-selection accuracy 81.1% (dev 66.7%, fresh 90.9%); no-tool 11/11; escalate precision 45%; ticket-only cases escalated 6/11 (dev 5/5, fresh 1/6) |
 
+| `agent-escalation-policy` | agent (live) | same 37 | `npm run eval:agent -- --category tool_incident,tool_no_action --resume --label escalation-policy` at `2f5b68f` | after the over-escalation fix: accuracy 91.9% (dev 80.0%, fresh 100%); ticket-only escalated 2/12 (fresh 0/7); escalations missed 0/8. Before/after with the same scorer: [`comparison.md`](agent-escalation-policy/comparison.md) |
+
+Scoring changed between the baseline and this run (commit `5d54b31`: multi-action labels, invalid calls by kind). Re-scoring the frozen baselines leaves every number unchanged except two. `escalate_ticket` precision goes from 45% to 65%: the draft labels' escalation alternative is now counted consistently. The pipeline's invalid tool calls go from "0" to 1 of 99 (provider-rejected), the call the old metric missed.
+
 The agent baseline's 37 cases come from two quota windows: 5 cached from 2026-09-30, 32 run 2026-10-03 after the two invalidated entries were removed (DEV_NOTES, 2026-10-02).
