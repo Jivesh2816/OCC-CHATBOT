@@ -288,7 +288,7 @@ async function main() {
   const recorder = CALLS_API ? instrument(groq, { tokensPerMinute: Number(process.env.EVAL_TPM || 7000), validIntents: VALID_INTENTS, toolNames: TOOL_NAMES }) : null;
   const runPipeline = args.mode === 'pipeline' ? require('../pipeline').runPipeline : null;
   // The agent only runs for these intents in production, so only they're evaluated.
-  const agentEligible = c => c.expected_tool !== null && (ACTION_AGENT_INTENTS.includes(c.expected_intent) || detectCrisis(c.query)?.urgent);
+  const agentEligible = c => c.expected_actions !== null && (ACTION_AGENT_INTENTS.includes(c.expected_intent) || detectCrisis(c.query)?.urgent);
   if (args.mode === 'agent') cases = cases.filter(agentEligible);
   if (!cases.length) throw new Error('No cases selected.');
   const maxAttempts = Number(process.env.EVAL_MAX_ATTEMPTS || 3);

@@ -33,7 +33,7 @@ test('cached live results are reused only for the same configuration and case in
   assert.equal(cache.lookup(loaded, c, 'agent', cache.configFingerprint('agent', { model: 'm2', prompts: [] })).status, 'stale');
   // Editing the case's query invalidates it; relabeling it doesn't.
   assert.equal(cache.lookup(loaded, { ...c, query: 'my heater is fine' }, 'agent', fp).status, 'stale');
-  assert.equal(cache.lookup(loaded, { ...c, expected_tool: 'none' }, 'agent', fp).status, 'fresh');
+  assert.equal(cache.lookup(loaded, { ...c, expected_actions: { ticket: 'none', draft: false } }, 'agent', fp).status, 'fresh');
   assert.equal(cache.lookup(loaded, normalize({ id: 'y', query: 'q' }), 'agent', fp).status, 'miss');
   // A half-written line from a crash is ignored rather than breaking the run.
   fs.appendFileSync(path.join(process.env.EVAL_CACHE_DIR, 'agent.jsonl'), '{"id":"z","finger');

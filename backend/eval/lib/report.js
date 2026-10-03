@@ -17,6 +17,17 @@ function failureTable(items, { limit = 60 } = {}) {
   return table(['Case', items[0].type ? 'Type' : 'Category', 'Input', 'Expected', 'Actual', 'Why'], rows) + more;
 }
 
+// The four kinds of invalid tool call, kept apart (eval/lib/tool-calls.js).
+function callQualityTable(q) {
+  return table(['Invalid tool calls, by kind', 'Count', 'Rate', 'Denominator'], [
+    ['Hallucinated tool (does not exist)', q.counts.hallucinated, pct(q.hallucinatedToolRate), `${q.rawToolCalls} raw model tool calls`],
+    ['Malformed arguments (not JSON, or break the tool schema)', q.counts.malformedArguments, pct(q.malformedArgumentRate), `${q.rawToolCalls} raw model tool calls`],
+    ['Provider-rejected tool call (Groq 400, unparseable generation)', q.counts.providerRejected, pct(q.providerRejectedRate), `${q.actionTurns} action-agent model turns`],
+    ['**Any model-side invalid call** (the three above)', q.counts.hallucinated + q.counts.malformedArguments + q.counts.providerRejected, pct(q.invalidCallRate), `${q.attemptedCalls} attempted calls (raw + rejected)`],
+    ['Server-side rejection (app validation refused a well-formed call)', q.counts.serverRejected, pct(q.serverRejectedRate), `${q.executedCalls} executed calls`]
+  ]);
+}
+
 function renderReport(results) {
   const { meta, metrics: m, failures: f } = results;
   const out = [];
@@ -115,9 +126,11 @@ function renderReport(results) {
       ['Cases with a tool label', t.n], ['Agent tool-selection accuracy', pct(t.agentSelectionAccuracy)], ['System tool-selection accuracy (incl. critic)', pct(t.systemSelectionAccuracy)],
       ['Act / don\'t act: precision, recall', `${pct(t.actDecision.precision)}, ${pct(t.actDecision.recall)}`],
       ['Tool calls made by the agent', t.toolCalls], ['Execution success rate', pct(t.executionSuccessRate)],
-      ['Invalid or hallucinated tool calls', `${t.invalidOrHallucinatedCalls} (${pct(t.invalidOrHallucinatedRate)})`],
+      ['Invalid tool calls (model-side, all kinds)', pct(t.invalidCallRate)],
       ['Action agent runs', t.actionAgentRuns], ['Guardrail checks violated', `${t.guardrailChecks.violations} of ${t.guardrailChecks.n}`]
     ]));
+    out.push('');
+    out.push(callQualityTable(t.callQuality));
     out.push('');
   }
 
@@ -130,13 +143,20 @@ function renderReport(results) {
     out.push(table(['Metric', 'Value'], [
       ['Cases', t.n], ['Accuracy (action level + required draft)', pct(t.accuracy)],
       ...Object.entries(t.bySplit).map(([k, v]) => [`Accuracy, ${k} split (n=${v.n})`, pct(v.accuracy)]),
+      ['Ticket-only cases escalated (over-escalation)', `${t.escalation.ticketOnlyEscalated} of ${t.escalation.ticketOnlyCases}`],
+      ['Escalation cases not escalated (under-escalation)', `${t.escalation.escalateDowngraded} of ${t.escalation.escalateCases}`],
       [`False tool-call rate (tool called when none was needed, n=${t.noToolCases})`, pct(t.falseToolCallRate)],
       ['Raw model tool calls', t.rawToolCalls], ['Hallucinated tool rate', pct(t.hallucinatedToolRate)], ['Malformed argument rate (vs the JSON schema)', pct(t.malformedArgumentRate)],
+      ['Invalid tool calls, model-side (all kinds)', pct(t.callQuality.invalidCallRate)],
       ['Loop-bound compliance (≤4 model turns, ≤6 tool calls)', pct(t.boundedLoopCompliance)], ['Guardrail checks violated', `${t.guardrailChecks.violations} of ${t.guardrailChecks.n}`],
       ['Agent latency p50 / p95 (ms)', `${num(t.latencyMs.p50)} / ${num(t.latencyMs.p95)}`]
     ]));
     out.push('');
-    out.push(table(['Tool', 'Expected in', 'Called in', 'Recall', 'Precision'], Object.entries(t.perTool).map(([k, v]) => [k, v.expected, v.called, pct(v.recall), pct(v.precision)])));
+    out.push(callQualityTable(t.callQuality));
+    out.push('');
+    out.push(table(['Tool', 'Expected in', 'Called in', 'Called where the label is silent (not scored)', 'Recall', 'Precision'], Object.entries(t.perTool).map(([k, v]) => [k, v.expected, v.called, v.calledWhereLabelSilent, pct(v.recall), pct(v.precision)])));
+    out.push('');
+    out.push(table(['Split', 'n', 'Accuracy', 'Ticket-only escalated', 'Escalation missed'], Object.entries(t.bySplit).map(([k, v]) => [k, v.n, pct(v.accuracy), `${v.ticketOnlyEscalated} of ${v.ticketOnlyCases}`, `${v.escalateDowngraded} of ${v.escalateCases}`])));
     out.push('');
     out.push('Action level confusion (rows = expected, columns = what the agent did):');
     out.push('');
@@ -213,8 +233,8 @@ function renderReport(results) {
   out.push('');
   const sections = [
     ['Safety: rules layer', f.safetyRules], ['Safety: whole system', f.safetySystem], ['Routing', f.routing], ['Retrieval misses (labeled intent)', f.retrieval],
-    ['Retrieval false matches (context given when the KB has no answer)', f.retrievalFalseMatches], ['Tool selection', f.tools], ['Tool guardrails', f.toolGuardrails],
-    ['Action agent decisions', f.agentTools], ['Action agent: invalid or hallucinated calls', f.agentMalformed], ['Action agent guardrails', f.agentGuardrails],
+    ['Retrieval false matches (context given when the KB has no answer)', f.retrievalFalseMatches], ['Tool selection', f.tools], ['Tool guardrails', f.toolGuardrails], ['Invalid tool calls', f.toolCalls],
+    ['Action agent decisions', f.agentTools], ['Action agent: invalid tool calls', f.agentMalformed], ['Action agent guardrails', f.agentGuardrails],
     ['Answer checks', f.answerChecks], ['Groundedness', f.grounding], ['Unsupported specifics (heuristic, review manually)', f.unsupportedSpecifics], ['Errored cases', f.errors]
   ];
   for (const [title, items] of sections) {

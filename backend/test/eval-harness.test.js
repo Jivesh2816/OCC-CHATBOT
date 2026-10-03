@@ -47,7 +47,7 @@ test('fabrication scan accepts specifics from the knowledge base or the student,
 
 test('cases whose model calls failed are excluded from quality metrics and counted as errors', () => {
   const offline = { retrieval: { goldIntent: { faqIds: [], sourceIds: [], faqScores: [], sourceScores: [], ms: 1 }, ungated: { faqIds: [], sourceIds: [], ms: 1 } }, rules: { crisis: null, escalates: false, ms: 0 } };
-  const base = { expected_source_ids: [], acceptable_intents: [], acceptable_crisis: [], setup: [], retrieval_should_be_empty: false, expected_crisis: null, should_escalate: false, expected_tool: null, difficulty: 'easy' };
+  const base = { expected_source_ids: [], acceptable_intents: [], acceptable_crisis: [], setup: [], retrieval_should_be_empty: false, expected_crisis: null, should_escalate: false, expected_actions: null, difficulty: 'easy' };
   const casesById = {
     a: { ...base, id: 'a', category: 'info_housing', query: 'q1', expected_intent: 'housing' },
     b: { ...base, id: 'b', category: 'info_housing', query: 'q2', expected_intent: 'housing' }

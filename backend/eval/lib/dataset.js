@@ -13,7 +13,32 @@ const { officialSources, allFAQs } = require('../../lib/knowledge');
 const DATASET_PATH = path.join(__dirname, '..', 'dataset.json');
 
 const TOOL_NAMES = ACTION_TOOLS.map(t => t.function.name);
-const EXPECTED_TOOLS = ['none', ...TOOL_NAMES];
+// Expected actions are multi-label: { ticket, draft }.
+//   ticket: 'none' | 'create' (a ticket, no escalation) | 'escalate' (ticket + escalate_ticket)
+//   draft:  true (draft_followup_email expected) | false (no draft expected) | null (the
+//           label does not say; drafting is neither required nor counted against the agent)
+// expected_actions null = the case's tool behavior is not scored. acceptable_actions lists
+// alternatives that also count as correct. When drafting is expected: eval/README.md.
+const TICKET_LEVELS = ['none', 'create', 'escalate'];
+// The tools a run must include to satisfy an expected-actions label.
+function requiredTools(actions) {
+  return [...(actions.ticket !== 'none' ? ['create_ticket'] : []), ...(actions.ticket === 'escalate' ? ['escalate_ticket'] : []), ...(actions.draft === true ? ['draft_followup_email'] : [])];
+}
+// The pipeline's coarser check ("this tool must be among the calls"): the most
+// specific tool the label requires, or 'none'.
+function primaryTool(actions) {
+  return actions.draft === true ? 'draft_followup_email' : actions.ticket === 'escalate' ? 'escalate_ticket' : actions.ticket === 'create' ? 'create_ticket' : 'none';
+}
+function actionProblems(a) {
+  if (!a || typeof a !== 'object' || Array.isArray(a)) return ['must be an object { ticket, draft }'];
+  const p = [];
+  for (const key of Object.keys(a)) if (!['ticket', 'draft'].includes(key)) p.push(`unexpected key "${key}"`);
+  if (!TICKET_LEVELS.includes(a.ticket)) p.push(`ticket must be one of ${TICKET_LEVELS.join(', ')}`);
+  if (![true, false, null].includes(a.draft)) p.push('draft must be true, false or null');
+  // A draft is always about an existing ticket, so "no ticket" means "no draft".
+  if (a.ticket === 'none' && a.draft !== false) p.push('ticket "none" requires draft false');
+  return p;
+}
 const CRISIS_IDS = CATEGORIES.map(c => c.id);
 const DIFFICULTIES = ['easy', 'medium', 'hard'];
 // dev: used while developing fixes.
@@ -29,7 +54,7 @@ const CATEGORIES_ALLOWED = [
   'tool_incident', 'tool_no_action', 'security_injection', 'security_unsupported_action', 'security_fabrication',
   'robustness_input', 'memory_followup', 'retrieval_negative'
 ];
-const REQUIRED = ['id', 'category', 'difficulty', 'query', 'expected_intent', 'expected_source_ids', 'expected_crisis', 'should_escalate', 'expected_tool'];
+const REQUIRED = ['id', 'category', 'difficulty', 'query', 'expected_intent', 'expected_source_ids', 'expected_crisis', 'should_escalate', 'expected_actions'];
 
 function knownSourceIds() {
   return new Set([...officialSources.map(s => s.id), ...allFAQs().map(f => f.id)]);
@@ -62,10 +87,14 @@ function validateCases(cases) {
     if (c.retrieval_should_be_empty && c.expected_source_ids?.length) problems.push(`${where}: retrieval_should_be_empty with labeled sources`);
     if (c.expected_crisis !== null && !CRISIS_IDS.includes(c.expected_crisis)) problems.push(`${where}: unknown crisis id "${c.expected_crisis}"`);
     for (const id of c.acceptable_crisis || []) if (!CRISIS_IDS.includes(id)) problems.push(`${where}: unknown acceptable crisis "${id}"`);
-    for (const tool of c.acceptable_tools || []) if (!EXPECTED_TOOLS.includes(tool)) problems.push(`${where}: unknown acceptable tool "${tool}"`);
+    // The single-tool label it replaced can't express e.g. escalate + draft; reject it so there is one source of truth.
+    for (const legacy of ['expected_tool', 'acceptable_tools']) if (legacy in c) problems.push(`${where}: "${legacy}" is replaced by expected_actions / acceptable_actions`);
+    if (c.acceptable_actions !== undefined && !Array.isArray(c.acceptable_actions)) problems.push(`${where}: acceptable_actions must be an array`);
+    for (const alt of c.acceptable_actions || []) for (const p of actionProblems(alt)) problems.push(`${where}: acceptable_actions: ${p}`);
+    if (c.acceptable_actions?.length && c.expected_actions === null) problems.push(`${where}: acceptable_actions without expected_actions`);
     if (![true, false, null].includes(c.should_escalate)) problems.push(`${where}: should_escalate must be true, false or null`);
     if (c.expected_crisis && c.should_escalate === false) problems.push(`${where}: a labeled crisis must not be should_escalate=false`);
-    if (c.expected_tool !== null && !EXPECTED_TOOLS.includes(c.expected_tool)) problems.push(`${where}: unknown tool "${c.expected_tool}"`);
+    if (c.expected_actions !== null && c.expected_actions !== undefined) for (const p of actionProblems(c.expected_actions)) problems.push(`${where}: expected_actions: ${p}`);
     if (c.setup && (!Array.isArray(c.setup) || c.setup.some(t => typeof t !== 'string'))) problems.push(`${where}: setup must be an array of strings`);
     for (const pattern of c.answer_checks?.must_not_match || []) {
       try { new RegExp(pattern, 'i'); } catch { problems.push(`${where}: bad regex ${pattern}`); }
@@ -81,7 +110,7 @@ function normalize(c) {
     setup: [],
     acceptable_intents: [],
     acceptable_crisis: [],
-    acceptable_tools: [],
+    acceptable_actions: [],
     retrieval_should_be_empty: false,
     answer_checks: null,
     tool_checks: null,
@@ -97,4 +126,4 @@ function loadDataset(file = DATASET_PATH) {
   return { version: raw.version, cases: raw.cases.map(normalize) };
 }
 
-module.exports = { SPLITS, DATASET_PATH, TOOL_NAMES, CRISIS_IDS, CATEGORIES_ALLOWED, loadDataset, validateCases, normalize };
+module.exports = { SPLITS, DATASET_PATH, TOOL_NAMES, TICKET_LEVELS, CRISIS_IDS, CATEGORIES_ALLOWED, loadDataset, validateCases, normalize, requiredTools, primaryTool };

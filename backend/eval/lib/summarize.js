@@ -4,6 +4,8 @@
 // reliability instead, so an API outage can't masquerade as a wrong answer.
 const { VALID_INTENTS } = require('../../pipeline/router');
 const { classificationReport, rankingMetrics, binaryMetrics, latencySummary, ratio, round } = require('./metrics');
+const { classifyToolCalls, summarizeToolCalls } = require('./tool-calls');
+const { requiredTools, primaryTool } = require('./dataset');
 
 const isFaq = id => id.startsWith('faq-');
 const groupBy = (items, key) => items.reduce((acc, item) => ((acc[key(item)] ||= []).push(item), acc), {});
@@ -25,36 +27,50 @@ function toolOk(expected, called) {
 // Action levels: what the agent decided to do, ignoring drafts.
 const LEVELS = ['none', 'create', 'escalate'];
 const levelOf = tools => (tools.has('escalate_ticket') ? 'escalate' : tools.has('create_ticket') ? 'create' : 'none');
-// A draft request implies at least a ticket; the draft itself is scored separately.
-const expectedLevel = tool => ({ none: 'none', create_ticket: 'create', escalate_ticket: 'escalate', draft_followup_email: 'create' }[tool]);
 const TOOL_KEYS = ['create_ticket', 'escalate_ticket', 'draft_followup_email'];
-// The tools a correct run must include for a given label.
-const requiredTools = tool => ({ none: [], create_ticket: ['create_ticket'], escalate_ticket: ['create_ticket', 'escalate_ticket'], draft_followup_email: ['create_ticket', 'draft_followup_email'] }[tool]);
+// A case's expected-actions label and its acceptable alternatives (eval/lib/dataset.js).
+const alternatives = c => [c.expected_actions, ...c.acceptable_actions];
+// Does a set of called tools satisfy one expected-actions label? The ticket level must
+// match; draft true requires a draft, draft false forbids one, draft null ignores it.
+const satisfies = (a, tools) => levelOf(tools) === a.ticket && (a.draft !== true || tools.has('draft_followup_email')) && (a.draft !== false || !tools.has('draft_followup_email'));
+
+// One row per invalid call, labeled with its kind (see lib/tool-calls.js).
+const KIND_LABELS = { hallucinated: 'hallucinated tool', malformedArguments: 'malformed arguments', providerRejected: 'provider-rejected tool call', serverRejected: 'server-side rejection' };
+function toolCallFailures(rows) {
+  return rows.flatMap(({ c, problems }) => Object.keys(KIND_LABELS).flatMap(kind => problems[kind].map(p => ({
+    id: c.id, category: c.category, input: c.query, expected: 'a valid call to an existing tool', actual: `${KIND_LABELS[kind]}: ${p.tool ?? 'unknown tool'}`, why: p.why
+  }))));
+}
 
 function agentMetrics(ok, failures, headline) {
   const called = r => new Set(r.live.tools.map(t => t.tool));
-  const labels = c => [c.expected_tool, ...c.acceptable_tools];
-  // Correct if the calls match the label's action level (or an acceptable
-  // alternative's), and a requested draft was made. Escalating as well as
-  // drafting is fine for a draft label.
-  const correct = ({ r, c }) => labels(c).some(label => {
-    const tools = called(r);
-    const level = levelOf(tools);
-    if (level !== expectedLevel(label) && !(label === 'draft_followup_email' && level === 'escalate')) return false;
-    return label !== 'draft_followup_email' || tools.has('draft_followup_email');
-  });
+  // Correct if the calls satisfy the expected actions or an acceptable alternative.
+  const correct = ({ r, c }) => alternatives(c).some(a => satisfies(a, called(r)));
   const matrix = Object.fromEntries(LEVELS.map(l => [l, Object.fromEntries(LEVELS.map(m => [m, 0]))]));
-  for (const { r, c } of ok) matrix[expectedLevel(c.expected_tool)][levelOf(called(r))]++;
+  for (const { r, c } of ok) matrix[c.expected_actions.ticket][levelOf(called(r))]++;
+  // Drafting is scored only where the label says whether a draft is expected.
+  const draftSpecified = c => alternatives(c).every(a => a.draft !== null);
   const perTool = Object.fromEntries(TOOL_KEYS.map(tool => {
-    const should = ok.filter(({ c }) => requiredTools(c.expected_tool).includes(tool));
-    const did = ok.filter(({ r }) => called(r).has(tool));
-    const justified = did.filter(({ c }) => labels(c).some(label => requiredTools(label).includes(tool)));
-    return [tool, { expected: should.length, called: did.length, recall: round(ratio(should.filter(({ r }) => called(r).has(tool)).length, should.length)), precision: round(ratio(justified.length, did.length)) }];
+    const should = ok.filter(({ c }) => requiredTools(c.expected_actions).includes(tool));
+    const scoredOn = tool === 'draft_followup_email' ? ok.filter(({ c }) => draftSpecified(c)) : ok;
+    const did = scoredOn.filter(({ r }) => called(r).has(tool));
+    const justified = did.filter(({ c }) => alternatives(c).some(a => requiredTools(a).includes(tool)));
+    const silent = ok.filter(({ r, c }) => !scoredOn.some(x => x.c === c) && called(r).has(tool)).length;
+    return [tool, { expected: should.length, called: did.length + silent, calledWhereLabelSilent: silent, recall: round(ratio(should.filter(({ r }) => called(r).has(tool)).length, should.length)), precision: round(ratio(justified.length, did.length)) }];
   }));
-  const noneCases = ok.filter(({ c }) => c.expected_tool === 'none');
-  const rawCalls = ok.flatMap(({ r }) => r.live.rawToolCalls);
-  const hallucinated = rawCalls.filter(tc => !TOOL_KEYS.includes(tc.name));
-  const malformedArgs = rawCalls.filter(tc => TOOL_KEYS.includes(tc.name) && tc.problems.length);
+  const noneCases = ok.filter(({ c }) => c.expected_actions.ticket === 'none');
+  // Over-escalation: escalated where no acceptable label escalates but one opens a ticket.
+  // Under-escalation: the expected label escalates and the agent did not.
+  const ticketOnly = rows => rows.filter(({ c }) => alternatives(c).some(a => a.ticket === 'create') && !alternatives(c).some(a => a.ticket === 'escalate'));
+  const mustEscalate = rows => rows.filter(({ c }) => c.expected_actions.ticket === 'escalate');
+  const escalationErrors = rows => ({
+    ticketOnlyCases: ticketOnly(rows).length,
+    ticketOnlyEscalated: ticketOnly(rows).filter(({ r }) => levelOf(called(r)) === 'escalate').length,
+    escalateCases: mustEscalate(rows).length,
+    escalateDowngraded: mustEscalate(rows).filter(({ r }) => levelOf(called(r)) !== 'escalate').length
+  });
+  const callProblems = ok.map(x => ({ ...x, problems: classifyToolCalls(x.r.live.llm, x.r.live.tools) }));
+  const callQuality = summarizeToolCalls(callProblems.map(x => x.problems));
   const bounded = ok.filter(({ r }) => r.live.modelTurns <= 4 && r.live.tools.length <= 6);
   const withChecks = ok.filter(({ c }) => c.tool_checks);
   const violations = ({ r, c }) => {
@@ -66,34 +82,36 @@ function agentMetrics(ok, failures, headline) {
     if (tc.forbid_arg_pattern && r.live.tools.some(t => new RegExp(tc.forbid_arg_pattern, 'i').test(JSON.stringify(t.args)))) v.push(`arguments matched /${tc.forbid_arg_pattern}/`);
     return v;
   };
-  const bySplit = Object.fromEntries(Object.entries(groupBy(ok, ({ c }) => c.split)).map(([k, rows]) => [k, { n: rows.length, accuracy: round(ratio(rows.filter(correct).length, rows.length)) }]));
+  const bySplit = Object.fromEntries(Object.entries(groupBy(ok, ({ c }) => c.split)).map(([k, rows]) => [k, { n: rows.length, accuracy: round(ratio(rows.filter(correct).length, rows.length)), ...escalationErrors(rows) }]));
   const agentTools = {
-    definition: "The action agent alone, given the labeled intent (no router gating, no critic backstop). Action level = none / create (ticket) / escalate (ticket + escalation); a draft label also requires draft_followup_email. acceptable_tools alternatives count as correct. Per-tool recall/precision: did the agent call each tool the label requires. Hallucinated and malformed rates are over raw model tool calls, checked against the agent's own JSON schemas.",
+    definition: "The action agent alone, given the labeled intent (no router gating, no critic backstop). Labels are multi-action (expected_actions: ticket none / create / escalate, plus draft true / false / null); correct = the calls satisfy the label or an acceptable alternative. Per-tool recall/precision: did the agent call each tool the label requires; draft_followup_email precision counts only cases whose label says whether a draft is expected (drafts where the label is silent are listed separately, not scored). Over-escalation = escalated where no acceptable label escalates; under-escalation = did not escalate where the label does. Invalid tool calls are split by kind (eval/lib/tool-calls.js).",
     n: ok.length,
     accuracy: round(ratio(ok.filter(correct).length, ok.length)),
     bySplit,
     levelConfusion: { labels: LEVELS, matrix },
+    escalation: escalationErrors(ok),
     perTool,
     falseToolCallRate: round(ratio(noneCases.filter(({ r }) => called(r).size > 0).length, noneCases.length)),
     noToolCases: noneCases.length,
-    rawToolCalls: rawCalls.length,
-    hallucinatedToolRate: round(ratio(hallucinated.length, rawCalls.length)),
-    malformedArgumentRate: round(ratio(malformedArgs.length, rawCalls.length)),
+    rawToolCalls: callQuality.rawToolCalls,
+    hallucinatedToolRate: callQuality.hallucinatedToolRate,
+    malformedArgumentRate: callQuality.malformedArgumentRate,
+    callQuality,
     boundedLoopCompliance: round(ratio(bounded.length, ok.length)),
     guardrailChecks: { n: withChecks.length, violations: withChecks.filter(x => violations(x).length).length },
     latencyMs: latencySummary(ok.map(({ r }) => r.live.totalMs))
   };
   failures.agentTools = ok.filter(x => !correct(x)).map(({ r, c }) => ({
     id: c.id, category: c.category, input: c.query,
-    expected: labels(c).join(' | '),
+    expected: alternatives(c).map(a => `${a.ticket}${a.draft === true ? ' + draft' : ''}`).join(' | '),
     actual: [...called(r)].join(', ') || 'no tool calls',
     why: levelOf(called(r)) === 'none' ? 'agent took no action'
-      : expectedLevel(c.expected_tool) === 'none' ? 'agent acted on a message that needed no action'
+      : c.expected_actions.ticket === 'none' ? 'agent acted on a message that needed no action'
         : `agent chose level "${levelOf(called(r))}" (ticket priority ${r.live.tools.find(t => t.tool === 'create_ticket')?.priority ?? 'n/a'})`
   }));
-  failures.agentMalformed = ok.flatMap(({ r, c }) => r.live.rawToolCalls.filter(tc => !TOOL_KEYS.includes(tc.name) || tc.problems.length).map(tc => ({ id: c.id, category: c.category, input: c.query, expected: 'a valid call to an existing tool', actual: String(tc.name), why: tc.problems.join('; ') })));
+  failures.agentMalformed = toolCallFailures(callProblems);
   failures.agentGuardrails = withChecks.filter(x => violations(x).length).map(x => ({ id: x.c.id, category: x.c.category, input: x.c.query, expected: JSON.stringify(x.c.tool_checks), actual: violations(x).join('; '), why: 'model-controlled arguments got past validation' }));
-  headline.push(`agent tools: accuracy ${pct(agentTools.accuracy)} over ${ok.length} cases; false tool-call rate ${pct(agentTools.falseToolCallRate)} (n=${noneCases.length}); hallucinated ${hallucinated.length}/${rawCalls.length}, malformed args ${malformedArgs.length}/${rawCalls.length}`);
+  headline.push(`agent tools: accuracy ${pct(agentTools.accuracy)} over ${ok.length} cases; false tool-call rate ${pct(agentTools.falseToolCallRate)} (n=${noneCases.length}); hallucinated ${callQuality.counts.hallucinated}/${callQuality.rawToolCalls}, malformed args ${callQuality.counts.malformedArguments}/${callQuality.rawToolCalls}, provider-rejected ${callQuality.counts.providerRejected}/${callQuality.actionTurns} turns`);
   return { agentTools };
 }
 
@@ -258,10 +276,10 @@ function summarize({ meta, records, casesById }) {
 
   // ------------------------------------------------------------------ tools
   if (mode === 'pipeline') {
-    const labeled = ok.filter(({ c }) => c.expected_tool !== null);
+    const labeled = ok.filter(({ c }) => c.expected_actions !== null);
     const agentCallsAll = ok.flatMap(({ r }) => r.live.agentTools);
-    const actionCalls = ok.flatMap(({ r }) => r.live.llm.filter(call => call.stage === 'action'));
-    const malformedTool = actionCalls.flatMap(call => call.malformed);
+    const callProblems = ok.map(x => ({ ...x, problems: classifyToolCalls(x.r.live.llm, x.r.live.agentTools) }));
+    const callQuality = summarizeToolCalls(callProblems.map(x => x.problems));
     const systemTools = r => new Set([...toolsCalled(r), ...r.live.criticTools]);
     const checkViolations = ({ r, c }) => {
       const v = [];
@@ -276,23 +294,24 @@ function summarize({ meta, records, casesById }) {
     metrics.tools = {
       definition: 'Agent = tool calls the action agent itself chose; system = including tickets the critic forced. expected "none" = no tool call; a tool name = that tool must be among the calls.',
       n: labeled.length,
-      agentSelectionAccuracy: round(ratio(labeled.filter(({ r, c }) => toolOk(c.expected_tool, toolsCalled(r))).length, labeled.length)),
-      systemSelectionAccuracy: round(ratio(labeled.filter(({ r, c }) => toolOk(c.expected_tool, systemTools(r))).length, labeled.length)),
-      actDecision: binaryMetrics(labeled.map(({ r, c }) => ({ expected: c.expected_tool !== 'none', predicted: toolsCalled(r).size > 0 }))),
+      agentSelectionAccuracy: round(ratio(labeled.filter(({ r, c }) => toolOk(primaryTool(c.expected_actions), toolsCalled(r))).length, labeled.length)),
+      systemSelectionAccuracy: round(ratio(labeled.filter(({ r, c }) => toolOk(primaryTool(c.expected_actions), systemTools(r))).length, labeled.length)),
+      actDecision: binaryMetrics(labeled.map(({ r, c }) => ({ expected: c.expected_actions.ticket !== 'none', predicted: toolsCalled(r).size > 0 }))),
       toolCalls: agentCallsAll.length,
       executionSuccessRate: round(ratio(agentCallsAll.filter(t => !t.error).length, agentCallsAll.length)),
-      invalidOrHallucinatedCalls: malformedTool.length,
-      invalidOrHallucinatedRate: round(ratio(malformedTool.length, agentCallsAll.length)),
+      callQuality,
+      invalidCallRate: callQuality.invalidCallRate,
       actionAgentRuns: ok.filter(({ r }) => r.live.actionAgentRan).length,
       guardrailChecks: { n: withChecks.length, violations: withChecks.filter(x => checkViolations(x).length).length }
     };
-    failures.tools = labeled.filter(({ r, c }) => !toolOk(c.expected_tool, toolsCalled(r))).map(({ r, c }) => ({
-      id: c.id, category: c.category, input: c.query, expected: c.expected_tool,
+    failures.tools = labeled.filter(({ r, c }) => !toolOk(primaryTool(c.expected_actions), toolsCalled(r))).map(({ r, c }) => ({
+      id: c.id, category: c.category, input: c.query, expected: primaryTool(c.expected_actions),
       actual: `${[...toolsCalled(r)].join(', ') || 'no tool calls'}${r.live.criticTools.length ? ` (critic added: ${r.live.criticTools.join(', ')})` : ''}${r.live.actionAgentRan ? '' : ' — action agent did not run'}`,
-      why: !r.live.actionAgentRan ? `action agent skipped (intent ${r.live.intent}, router incident=${r.live.routerIncident})` : c.expected_tool === 'none' ? 'agent acted on a message that needed no action' : 'agent did not call the expected tool'
+      why: !r.live.actionAgentRan ? `action agent skipped (intent ${r.live.intent}, router incident=${r.live.routerIncident})` : c.expected_actions.ticket === 'none' ? 'agent acted on a message that needed no action' : 'agent did not call the expected tool'
     }));
     failures.toolGuardrails = withChecks.filter(x => checkViolations(x).length).map(x => ({ id: x.c.id, category: x.c.category, input: x.c.query, expected: JSON.stringify(x.c.tool_checks), actual: checkViolations(x).join('; '), why: 'model-controlled arguments got past validation' }));
-    headline.push(`tools: agent selection ${pct(metrics.tools.agentSelectionAccuracy)}, system ${pct(metrics.tools.systemSelectionAccuracy)} (n=${labeled.length}); execution success ${pct(metrics.tools.executionSuccessRate)} of ${agentCallsAll.length} calls; invalid/hallucinated ${metrics.tools.invalidOrHallucinatedCalls}`);
+    headline.push(`tools: agent selection ${pct(metrics.tools.agentSelectionAccuracy)}, system ${pct(metrics.tools.systemSelectionAccuracy)} (n=${labeled.length}); execution success ${pct(metrics.tools.executionSuccessRate)} of ${agentCallsAll.length} calls; invalid calls ${callQuality.counts.hallucinated + callQuality.counts.malformedArguments + callQuality.counts.providerRejected}/${callQuality.attemptedCalls} (hallucinated ${callQuality.counts.hallucinated}, malformed args ${callQuality.counts.malformedArguments}, provider-rejected ${callQuality.counts.providerRejected}); server-rejected ${callQuality.counts.serverRejected}`);
+    failures.toolCalls = toolCallFailures(callProblems);
 
     // ---------------------------------------------------------------- answers
     const answered = ok.filter(({ r }) => typeof r.live.answer === 'string');

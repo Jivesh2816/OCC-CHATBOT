@@ -52,7 +52,7 @@ const agentAttempt = (recorder, query) => async () => {
 
 // The fields the summarizer reads that normalize() leaves to the dataset file.
 const labeled = fields => normalize({ expected_source_ids: [], expected_crisis: null, should_escalate: null, difficulty: 'easy', ...fields });
-const c = labeled({ id: 'tool-neighbour-threatening', category: 'tool_incident', query: 'my neighbour keeps threatening me', expected_intent: 'housing', expected_tool: 'escalate_ticket' });
+const c = labeled({ id: 'tool-neighbour-threatening', category: 'tool_incident', query: 'my neighbour keeps threatening me', expected_intent: 'housing', expected_actions: { ticket: 'escalate', draft: null } });
 
 test('a 429 on the second tool-loop turn (daily quota) marks the case incomplete: not cached, not scored, re-run on --resume', async () => {
   const recorder = scriptTicketThen(() => rateLimited(600));
@@ -74,7 +74,7 @@ test('a 429 on the second tool-loop turn (daily quota) marks the case incomplete
 
   // Excluded from accuracy: only the completed case is scored.
   const offline = { retrieval: { goldIntent: { faqIds: [], sourceIds: [], faqScores: [], sourceScores: [], ms: 1 }, ungated: { faqIds: [], sourceIds: [], ms: 1 } }, rules: { crisis: null, escalates: false, ms: 0 } };
-  const done = labeled({ id: 'done', category: 'tool_incident', query: 'no heat in January', expected_intent: 'housing', expected_tool: 'escalate_ticket' });
+  const done = labeled({ id: 'done', category: 'tool_incident', query: 'no heat in January', expected_intent: 'housing', expected_actions: { ticket: 'escalate', draft: null } });
   const completedLive = { intent: 'housing', tools: [{ tool: 'create_ticket', args: {}, error: null, priority: 'high' }, { tool: 'escalate_ticket', args: {}, error: null, priority: null }], rawToolCalls: [], modelTurns: 2, tickets: [], llm: [{ stage: 'action', ms: 5, usage: { input: 1, output: 1 }, error: null, malformed: [] }] };
   const results = summarize({
     meta: { mode: 'agent' },
