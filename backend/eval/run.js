@@ -94,7 +94,8 @@ const { validateToolCall } = require('./lib/tool-schema');
 const { detectCrisis } = require('../lib/crisis');
 const critic = require('../lib/critic');
 const { loadDataset, TOOL_NAMES } = require('./lib/dataset');
-const { instrument, isInfraError } = require('./lib/llm-recorder');
+const { instrument } = require('./lib/llm-recorder');
+const { runAttempts, isCompleteObservation } = require('./lib/attempts');
 const { scanAnswer } = require('./lib/fabrication');
 const { groundedness } = require('./lib/groundedness');
 const { summarize } = require('./lib/summarize');
@@ -296,6 +297,7 @@ async function main() {
 
   const records = [];
   let aborted = null;
+  let incomplete = null;
   for (const [index, c] of cases.entries()) {
     appLogs.length = 0;
     const record = { id: c.id, offline: offlineRecord(c), attempts: 0, error: null };
@@ -312,32 +314,20 @@ async function main() {
       continue;
     } else if (LIVE) {
       if (CALLS_API) cacheStats.live++;
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        record.attempts = attempt;
-        record.error = null;
-        try {
-          record.live = args.mode === 'router' ? await routerRecord(c, recorder, replay)
-            : args.mode === 'agent' ? await agentRecord(c, recorder)
-            : await pipelineRecord(c, recorder, runPipeline);
-        } catch (error) {
-          record.error = { kind: 'exception', message: String(error?.message || error).slice(0, 300) };
-        }
-        // A rate-limited or failed model call degrades the app to its fallbacks,
-        // which would be scored as a wrong answer. Retry the case instead; if it
-        // keeps failing, it's reported under reliability, not quality.
-        const failedCalls = (record.live?.llm || []).filter(isInfraError);
-        if (!record.error && !failedCalls.length) break;
-        const limited = failedCalls.find(call => call.error.status === 429);
-        // Waits longer than EVAL_MAX_WAIT_MIN (default 5) usually mean the daily quota: stop
-        // cleanly so --resume can continue later, instead of sleeping for hours.
-        if (limited && (limited.error.retryAfterMs || 0) > Number(process.env.EVAL_MAX_WAIT_MIN || 5) * 60_000) {
-          aborted = `rate limit with retry-after ${Math.round(limited.error.retryAfterMs / 60000)} min (daily token quota?) at case ${c.id}`;
-          break;
-        }
-        if (!record.error) record.error = { kind: 'llm_error', message: failedCalls.map(call => `${call.stage}: ${call.error.status ?? ''} ${call.error.message}`).join('; ').slice(0, 300) };
-        if (attempt < maxAttempts) await sleep(limited?.error.retryAfterMs || 5000 * attempt);
-      }
-      if (CALLS_API && record.live && !record.error) {
+      const run = await runAttempts({
+        caseId: c.id,
+        maxAttempts,
+        // Waits longer than EVAL_MAX_WAIT_MIN (default 5) usually mean the daily quota.
+        maxWaitMs: Number(process.env.EVAL_MAX_WAIT_MIN || 5) * 60_000,
+        sleep,
+        attempt: () => (args.mode === 'router' ? routerRecord(c, recorder, replay)
+          : args.mode === 'agent' ? agentRecord(c, recorder)
+          : pipelineRecord(c, recorder, runPipeline))
+      });
+      Object.assign(record, { live: run.live, error: run.error, attempts: run.attempts });
+      aborted = run.aborted;
+      // Only a case that ran to completion is cached; anything else re-runs on --resume.
+      if (CALLS_API && isCompleteObservation(record)) {
         cache.appendCache(args.mode, {
           id: c.id, fingerprint, caseHash: cache.caseInputHash(args.mode, c), recordedAt: new Date().toISOString(), model: MODEL, attempts: record.attempts,
           live: args.mode === 'router' ? { router: record.live.router, llm: record.live.llm } : record.live
@@ -354,7 +344,12 @@ async function main() {
     if (LIVE) say(`[${index + 1}/${cases.length}] ${c.id}${record.cached ? ` (cached, ${record.cached.status})` : ''}${record.error ? `  ERROR ${record.error.kind}: ${record.error.message.slice(0, 120)}` : ''}`);
     if (aborted) {
       say(`eval: stopping early: ${aborted}`);
-      if (record.error) records.pop();
+      // The interrupted case is not scored or cached; its partial result (e.g. the
+      // tools the agent called before the 429) is kept in meta for debugging.
+      if (record.error) {
+        records.pop();
+        incomplete = { id: record.id, attempts: record.attempts, error: record.error, partial: record.live };
+      }
       break;
     }
   }
@@ -377,6 +372,7 @@ async function main() {
     // re-scored (--replay) against the same prompt and model.
     routerFingerprint: routerFingerprint(),
     aborted,
+    incomplete,
     pricing: process.env.EVAL_PRICE_INPUT_PER_M && process.env.EVAL_PRICE_OUTPUT_PER_M
       ? { inputPerM: Number(process.env.EVAL_PRICE_INPUT_PER_M), outputPerM: Number(process.env.EVAL_PRICE_OUTPUT_PER_M), source: 'EVAL_PRICE_* environment variables' }
       : null

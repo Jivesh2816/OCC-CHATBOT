@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { isInfraError } = require('./llm-recorder');
 
 // EVAL_CACHE_DIR points dry runs (e.g. against a scripted model) somewhere else,
 // so they can never be mistaken for real model results on --resume.
@@ -69,9 +70,11 @@ function appendCache(mode, entry) {
   fs.appendFileSync(cachePath(mode), JSON.stringify(entry) + '\n');
 }
 
-// Returns { entry, status: 'fresh' | 'stale' | 'miss' }.
+// Returns { entry, status: 'fresh' | 'stale' | 'miss' }. An entry whose model
+// calls include an infrastructure failure (429, 5xx, network) never finished,
+// whatever wrote it, so it is never reused.
 function lookup(cache, c, mode, fingerprint) {
-  const entries = (cache.get(c.id) || []).filter(e => !e.error);
+  const entries = (cache.get(c.id) || []).filter(e => !e.error && !(e.live?.llm || []).some(isInfraError));
   if (!entries.length) return { entry: null, status: 'miss' };
   const caseHash = caseInputHash(mode, c);
   const fresh = entries.filter(e => e.fingerprint === fingerprint && e.caseHash === caseHash).pop();
