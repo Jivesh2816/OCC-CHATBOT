@@ -1,0 +1,11 @@
+{
+  "name": "occ-eval-experiments",
+  "private": true,
+  "description": "Isolated dependencies for one-off retrieval experiments. Not used by the app, its tests, or CI.",
+  "scripts": {
+    "dense-retrieval": "node dense-retrieval.js"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.7.0"
+  }
+}

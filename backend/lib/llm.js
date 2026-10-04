@@ -10,7 +10,9 @@ const groq = new Groq({
   timeout: 20 * 1000,
   maxRetries: 1
 });
-const MODEL = 'openai/gpt-oss-120b';
+// GROQ_MODEL overrides it, e.g. to compare models in the eval. The eval
+// report records whichever model actually ran.
+const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 
 // JSON-mode completion used by the lease and listing checkers.
 async function completeJSON(system, user) {

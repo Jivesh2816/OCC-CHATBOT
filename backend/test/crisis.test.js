@@ -27,7 +27,14 @@ const CRISIS = [
   ['my ex is following me home every night', 'danger'],
   ['im homeless tonight and have nowhere to sleep', 'housing_emergency'],
   ['my landlord changed the locks while I was at class and put my stuff on the curb', 'housing_emergency'],
-  ['I got locked out by my landlord and its -20 outside, I have nowhere to go', 'housing_emergency']
+  ['I got locked out by my landlord and its -20 outside, I have nowhere to go', 'housing_emergency'],
+  // A look-alike elsewhere in the message must not hide a real crisis: vetoes
+  // cancel only the phrase they overlap.
+  ['I went to a suicide prevention workshop but I still want to kill myself', 'self_harm'],
+  ["I'm homeless, is there a homeless shelter near campus?", 'housing_emergency'],
+  ['I have been stockpiling my meds', 'self_harm'],
+  ['I think I was drugged at the bar last night', 'sexual_violence'],
+  ['he threw plates at me again', 'violence']
 ];
 
 // Look-alikes that must not trigger a crisis response.
@@ -42,7 +49,15 @@ const NOT_CRISIS = [
   'my landlord is pushing me to sign a new lease',
   'I want to end my lease early',
   'what happens if I get evicted?',
-  'How do I sublet my room?'
+  'How do I sublet my room?',
+  // Information-seeking uses of crisis words.
+  'Does UW run sexual assault prevention training?',
+  'How can I volunteer at a homeless shelter?',
+  'lots of people started following me on instagram',
+  'I locked myself out of my apartment, where is a locksmith?',
+  'Can I park on the street overnight?',
+  // Kept out of the rules on purpose (hyperbole as often as not); the router judges these.
+  "My prof said he'd kill me if I'm late lol"
 ];
 
 for (const [message, category] of CRISIS) {

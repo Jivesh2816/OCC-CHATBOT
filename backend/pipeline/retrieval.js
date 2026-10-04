@@ -1,7 +1,7 @@
 const { groq, MODEL } = require('../lib/llm');
 const { historyAsChat, contextualQuery } = require('./memory');
 const { INTENT_CATEGORY_MAP } = require('./router');
-const { searchFAQ, getIntelligentResponse, findRelevantFAQs, findOfficialSources, normalizeCitations, toCitations } = require('../lib/knowledge');
+const { searchFAQ, getIntelligentResponse, scoredFAQs, scoredOfficialSources, normalizeCitations, toCitations } = require('../lib/knowledge');
 
 const ANSWER_SYSTEM_PROMPT = `You are a helpful assistant for University of Waterloo off-campus students. Be friendly, empathetic, practical, and concise.
 
@@ -67,15 +67,45 @@ async function generateAnswer({ message, faqs = [], sources = [], history = [], 
 // FAQ match, then to the keyword responder.
 // ---------------------------------------------------------------------------
 
-async function retrievalAgent(message, intent, { history = [], onToken = null, onRetrieved = null } = {}) {
-  const scopedCategory = intent ? INTENT_CATEGORY_MAP[intent] : null;
-  const query = contextualQuery(message, history);
+// Students describe losing their housing in their own words ("nowhere to sleep",
+// "changed the locks"); the official pages say "unhoused", "temporary places to
+// stay", "eviction order". When the crisis detector has already recognised a
+// housing emergency, search in the pages' vocabulary too, so the answer can
+// cite the urgent-housing and eviction-rules passages. The eval showed these
+// were retrieved for 1 of 8 housing emergencies without this.
+const HOUSING_EMERGENCY_TERMS = 'urgent housing unhoused temporary short term accommodation place to stay eviction evict order';
 
-  let relevantFAQs = findRelevantFAQs(message, 3, scopedCategory);
-  if (relevantFAQs.length === 0 && query !== message) relevantFAQs = findRelevantFAQs(query, 3, scopedCategory);
-  const sources = findOfficialSources(query, intent);
+// The retrieval step on its own: scored FAQ and official-passage hits for a
+// message, given the router's intent. Pure and model-free, so the eval can
+// score exactly what the pipeline retrieves (at any depth) without an LLM.
+// faqMinScore / sourceMinScore override the production cut-offs (eval sweeps only).
+function retrieve(message, intent, history = [], { faqTopN = 3, sourceTopN = 3, crisis = null, faqMinScore, sourceMinScore } = {}) {
+  const scopedCategory = intent ? INTENT_CATEGORY_MAP[intent] : null;
+  const baseQuery = contextualQuery(message, history);
+  const query = crisis?.id === 'housing_emergency' ? `${baseQuery} ${HOUSING_EMERGENCY_TERMS}` : baseQuery;
+
+  const faqOpts = { topN: faqTopN, category: scopedCategory, ...(faqMinScore !== undefined && { minScore: faqMinScore }) };
+  let faqs = scoredFAQs(message, faqOpts);
+  if (faqs.length === 0 && query !== message) faqs = scoredFAQs(query, faqOpts);
+  const sources = scoredOfficialSources(query, intent, { topN: sourceTopN, ...(sourceMinScore !== undefined && { minScore: sourceMinScore }) });
+  return { scopedCategory, baseQuery, query, faqs, sources };
+}
+
+async function retrievalAgent(message, intent, { history = [], crisis = null, onToken = null, onRetrieved = null } = {}) {
+  const retrieved = retrieve(message, intent, history, { crisis });
+  // The verbatim-FAQ fallback below uses the student's own words, not the
+  // expanded query: an FAQ served as-is has to match what they actually asked.
+  const { scopedCategory, baseQuery: query } = retrieved;
+  const relevantFAQs = retrieved.faqs.map(r => r.doc);
+  const sources = retrieved.sources.map(r => r.doc);
   console.log('Retrieval agent found', relevantFAQs.length, 'FAQs and', sources.length, 'official passages', scopedCategory ? `(scoped to ${scopedCategory})` : '(unscoped)');
-  onRetrieved?.({ faqs: relevantFAQs.map(f => f.question), sources: sources.map(s => ({ id: s.id, title: s.heading, publisher: s.publisher })) });
+  onRetrieved?.({
+    faqs: relevantFAQs.map(f => f.question),
+    faqIds: relevantFAQs.map(f => f.id),
+    sources: sources.map(s => ({ id: s.id, title: s.heading, publisher: s.publisher })),
+    // BM25 scores, for the request log and the eval (the UI doesn't display them).
+    scores: { faqs: retrieved.faqs.map(r => +r.score.toFixed(2)), sources: retrieved.sources.map(r => +r.score.toFixed(2)) }
+  });
 
   const generated = normalizeCitations(await generateAnswer({ message, faqs: relevantFAQs, sources, history, onToken }));
   if (generated) {
@@ -126,4 +156,4 @@ async function retrievalAgent(message, intent, { history = [], onToken = null, o
   };
 }
 
-module.exports = { generateAnswer, retrievalAgent };
+module.exports = { generateAnswer, retrieve, retrievalAgent };

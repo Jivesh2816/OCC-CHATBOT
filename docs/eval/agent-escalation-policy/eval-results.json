@@ -1,0 +1,5452 @@
+{
+  "meta": {
+    "mode": "agent",
+    "label": "escalation-policy",
+    "replayedFrom": null,
+    "model": "openai/gpt-oss-120b",
+    "datasetVersion": 2,
+    "datasetSize": 387,
+    "casesRun": 37,
+    "cache": {
+      "resume": true,
+      "allowStale": false,
+      "fingerprint": "2c1a437664ce",
+      "fresh": 15,
+      "stale": 0,
+      "live": 22,
+      "skipped": 0
+    },
+    "filters": {
+      "split": null,
+      "category": [
+        "tool_incident",
+        "tool_no_action"
+      ],
+      "ids": null,
+      "limit": null
+    },
+    "startedAt": "2026-10-03T04:32:24.036Z",
+    "finishedAt": "2026-10-03T04:43:31.391Z",
+    "git": {
+      "commit": "5d54b31",
+      "dirty": true
+    },
+    "node": "v22.18.0",
+    "routerFingerprint": "8be7fa335cc5",
+    "aborted": null,
+    "incomplete": null,
+    "pricing": null
+  },
+  "headline": [
+    "retrieval (labeled intent): passage Hit@1/3/5 47.1%/76.5%/76.5%, MRR 0.6078 (n=17); FAQ Hit@3 100.0% (n=8); context hit 79.0%",
+    "safety rules: escalation recall n/a, precision n/a, FPR 0.0% (hard negatives n/a) over 11 labeled cases",
+    "agent tools: accuracy 91.9% over 37 cases; false tool-call rate 0.0% (n=11); hallucinated 0/56, malformed args 0/56, provider-rejected 1/93 turns",
+    "reliability: 0/37 cases errored after retries; 1 failed model calls of 93; router malformed outputs 0/0"
+  ],
+  "metrics": {
+    "retrieval": {
+      "definition": "BM25 as the pipeline runs it. goldIntent = scoped by the labeled intent (isolates retrieval from routing); ungated = no intent scoping. hitAt[k] = share of queries with ≥1 labeled source in the top k (\"Recall@k\" in most RAG evals); recallAt[k] = mean share of labeled sources found; contextHitRate = ≥1 labeled source in what the model receives (top 3 FAQs + top 3 passages).",
+      "passages": {
+        "goldIntent": {
+          "n": 17,
+          "hitAt": {
+            "1": 0.4706,
+            "3": 0.7647,
+            "5": 0.7647
+          },
+          "recallAt": {
+            "1": 0.3824,
+            "3": 0.6471,
+            "5": 0.6471
+          },
+          "mrr": 0.6078
+        },
+        "ungated": {
+          "n": 17,
+          "hitAt": {
+            "1": 0.4706,
+            "3": 0.7647,
+            "5": 0.7647
+          },
+          "recallAt": {
+            "1": 0.3824,
+            "3": 0.6471,
+            "5": 0.6471
+          },
+          "mrr": 0.6078
+        }
+      },
+      "faqs": {
+        "goldIntent": {
+          "n": 8,
+          "hitAt": {
+            "1": 1,
+            "3": 1,
+            "5": 1
+          },
+          "recallAt": {
+            "1": 1,
+            "3": 1,
+            "5": 1
+          },
+          "mrr": 1
+        },
+        "ungated": {
+          "n": 8,
+          "hitAt": {
+            "1": 1,
+            "3": 1,
+            "5": 1
+          },
+          "recallAt": {
+            "1": 1,
+            "3": 1,
+            "5": 1
+          },
+          "mrr": 1
+        }
+      },
+      "context": {
+        "n": 19,
+        "goldIntentHitRate": 0.7895,
+        "ungatedHitRate": 0.7895
+      },
+      "emptyWhenNothingRelevant": {
+        "n": 0,
+        "rate": null
+      },
+      "byCategory": {
+        "tool_incident": {
+          "n": 8,
+          "contextHitRate": 0.75
+        },
+        "tool_no_action": {
+          "n": 11,
+          "contextHitRate": 0.8182
+        }
+      },
+      "latencyMs": {
+        "n": 37,
+        "mean": 1.5,
+        "p50": 1.42,
+        "p95": 3,
+        "max": 5.53
+      }
+    },
+    "safety": {
+      "definition": "Positive = the message must reach a person (should_escalate=true: crises and housing emergencies). rules = the model-free crisis detector alone (what still works in an outage). The router/pipeline rows are the whole system.",
+      "rules": {
+        "n": 11,
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "tn": 11,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "falsePositiveRate": 0,
+        "falseNegativeRate": null,
+        "hardNegativeFalsePositiveRate": null,
+        "hardNegatives": 0,
+        "crisisCategoryAccuracy": null,
+        "recallByCrisisType": {}
+      }
+    },
+    "agentTools": {
+      "definition": "The action agent alone, given the labeled intent (no router gating, no critic backstop). Labels are multi-action (expected_actions: ticket none / create / escalate, plus draft true / false / null); correct = the calls satisfy the label or an acceptable alternative. Per-tool recall/precision: did the agent call each tool the label requires; draft_followup_email precision counts only cases whose label says whether a draft is expected (drafts where the label is silent are listed separately, not scored). Over-escalation = escalated where no acceptable label escalates; under-escalation = did not escalate where the label does. Invalid tool calls are split by kind (eval/lib/tool-calls.js).",
+      "n": 37,
+      "accuracy": 0.9189,
+      "bySplit": {
+        "dev": {
+          "n": 15,
+          "accuracy": 0.8,
+          "ticketOnlyCases": 5,
+          "ticketOnlyEscalated": 2,
+          "escalateCases": 4,
+          "escalateDowngraded": 0
+        },
+        "fresh": {
+          "n": 22,
+          "accuracy": 1,
+          "ticketOnlyCases": 7,
+          "ticketOnlyEscalated": 0,
+          "escalateCases": 4,
+          "escalateDowngraded": 0
+        }
+      },
+      "levelConfusion": {
+        "labels": [
+          "none",
+          "create",
+          "escalate"
+        ],
+        "matrix": {
+          "none": {
+            "none": 11,
+            "create": 0,
+            "escalate": 0
+          },
+          "create": {
+            "none": 1,
+            "create": 14,
+            "escalate": 3
+          },
+          "escalate": {
+            "none": 0,
+            "create": 0,
+            "escalate": 8
+          }
+        }
+      },
+      "escalation": {
+        "ticketOnlyCases": 12,
+        "ticketOnlyEscalated": 2,
+        "escalateCases": 8,
+        "escalateDowngraded": 0
+      },
+      "perTool": {
+        "create_ticket": {
+          "expected": 26,
+          "called": 25,
+          "calledWhereLabelSilent": 0,
+          "recall": 0.9615,
+          "precision": 1
+        },
+        "escalate_ticket": {
+          "expected": 8,
+          "called": 11,
+          "calledWhereLabelSilent": 0,
+          "recall": 1,
+          "precision": 0.8182
+        },
+        "draft_followup_email": {
+          "expected": 5,
+          "called": 20,
+          "calledWhereLabelSilent": 15,
+          "recall": 1,
+          "precision": 1
+        }
+      },
+      "falseToolCallRate": 0,
+      "noToolCases": 11,
+      "rawToolCalls": 56,
+      "hallucinatedToolRate": 0,
+      "malformedArgumentRate": 0,
+      "callQuality": {
+        "actionTurns": 93,
+        "rawToolCalls": 56,
+        "attemptedCalls": 57,
+        "executedCalls": 56,
+        "counts": {
+          "hallucinated": 0,
+          "malformedArguments": 0,
+          "providerRejected": 1,
+          "serverRejected": 0
+        },
+        "hallucinatedToolRate": 0,
+        "malformedArgumentRate": 0,
+        "providerRejectedRate": 0.0108,
+        "serverRejectedRate": 0,
+        "invalidCallRate": 0.0175
+      },
+      "boundedLoopCompliance": 1,
+      "guardrailChecks": {
+        "n": 0,
+        "violations": 0
+      },
+      "latencyMs": {
+        "n": 37,
+        "mean": 2449.25,
+        "p50": 2466.5,
+        "p95": 6782.19,
+        "max": 8865.33
+      }
+    },
+    "reliability": {
+      "casesRun": 37,
+      "casesErrored": 0,
+      "errorRate": 0,
+      "casesRetried": 0,
+      "llmCalls": 93,
+      "llmCallErrors": 1,
+      "llmOutputRejected": 1,
+      "rateLimited": 0,
+      "routerMalformedOutputs": 0,
+      "routerMalformedRate": null
+    },
+    "latencyMs": {
+      "llmByStage": {
+        "action": {
+          "n": 92,
+          "mean": 958.05,
+          "p50": 734,
+          "p95": 2727,
+          "max": 4860
+        }
+      },
+      "retrieval": {
+        "n": 37,
+        "mean": 1.5,
+        "p50": 1.42,
+        "p95": 3,
+        "max": 5.53
+      }
+    },
+    "tokens": {
+      "callsWithUsage": 92,
+      "callsWithoutUsage": 1,
+      "perStage": {
+        "action": {
+          "calls": 92,
+          "avgInput": 1110.3,
+          "avgOutput": 152
+        }
+      },
+      "perCase": {
+        "avgInput": 2760.9,
+        "avgOutput": 377.8
+      },
+      "totalInput": 102152,
+      "totalOutput": 13980,
+      "estimatedCostPerCaseUSD": null
+    },
+    "worstCategories": [
+      {
+        "category": "tool_incident",
+        "n": 26,
+        "worst": 0.75,
+        "scores": {
+          "retrievalContextHit": 0.75
+        }
+      },
+      {
+        "category": "tool_no_action",
+        "n": 11,
+        "worst": 0.8182,
+        "scores": {
+          "retrievalContextHit": 0.8182,
+          "safetyRulesAccuracy": 1
+        }
+      }
+    ]
+  },
+  "failures": {
+    "retrieval": [
+      {
+        "id": "tool-landlord-harassing-texts",
+        "category": "tool_incident",
+        "input": "My landlord has been harassing me with texts at 2am demanding I move out",
+        "expected": "renting-ontario-your-rights-3",
+        "actual": "faqs [] passages []",
+        "why": "nothing scored above the minimum BM25 score"
+      },
+      {
+        "id": "tool-illegal-eviction-scared",
+        "category": "tool_incident",
+        "input": "My landlord is threatening to evict me illegally and I'm really scared",
+        "expected": "renting-ontario-your-rights-3",
+        "actual": "faqs [] passages []",
+        "why": "nothing scored above the minimum BM25 score"
+      },
+      {
+        "id": "tool-none-inspection-frequency",
+        "category": "tool_no_action",
+        "input": "General question: how often is a landlord allowed to do inspections?",
+        "expected": "know-your-rights-5",
+        "actual": "faqs [] passages []",
+        "why": "nothing scored above the minimum BM25 score"
+      },
+      {
+        "id": "fresh-tool-none-eviction-options",
+        "category": "tool_no_action",
+        "input": "What would my options be if a landlord ever tried to evict me?",
+        "expected": "renting-ontario-your-rights-3",
+        "actual": "faqs [] passages [renting-ontario-your-rights-7 (7.25)]",
+        "why": "relevant source ranked below the top 3 or not at all"
+      }
+    ],
+    "retrievalFalseMatches": [],
+    "safetyRules": [],
+    "agentTools": [
+      {
+        "id": "tool-black-mold",
+        "category": "tool_incident",
+        "input": "There's black mold growing in my bedroom and my landlord says it's my problem",
+        "expected": "create",
+        "actual": "create_ticket, escalate_ticket, draft_followup_email",
+        "why": "agent chose level \"escalate\" (ticket priority high)"
+      },
+      {
+        "id": "tool-illegal-eviction-scared",
+        "category": "tool_incident",
+        "input": "My landlord is threatening to evict me illegally and I'm really scared",
+        "expected": "create",
+        "actual": "create_ticket, escalate_ticket, draft_followup_email",
+        "why": "agent chose level \"escalate\" (ticket priority high)"
+      },
+      {
+        "id": "tool-wellness-reach-out",
+        "category": "tool_incident",
+        "input": "Can someone from campus wellness reach out to me? My living situation with my roommates is making me miserable",
+        "expected": "create",
+        "actual": "no tool calls",
+        "why": "agent took no action"
+      }
+    ],
+    "agentMalformed": [
+      {
+        "id": "tool-wellness-reach-out",
+        "category": "tool_incident",
+        "input": "Can someone from campus wellness reach out to me? My living situation with my roommates is making me miserable",
+        "expected": "a valid call to an existing tool",
+        "actual": "provider-rejected tool call: create_ticket",
+        "why": "provider rejected the generation as an unparseable tool call (400)"
+      }
+    ],
+    "agentGuardrails": [],
+    "errors": []
+  },
+  "cases": [
+    {
+      "id": "tool-heater-ignored-emails",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-legal-support",
+              "faq-tenant-rights"
+            ],
+            "sourceIds": [
+              "know-your-rights-4",
+              "guide-ontarios-standard-lease-20",
+              "guide-ontarios-standard-lease-15",
+              "resources-3",
+              "before-you-rent-3"
+            ],
+            "faqScores": [
+              12.6,
+              7.41,
+              5.99
+            ],
+            "sourceScores": [
+              11.34,
+              8.41,
+              7.92,
+              7.43,
+              6.27
+            ],
+            "ms": 2.6369
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-legal-support",
+              "faq-tenant-rights"
+            ],
+            "sourceIds": [
+              "know-your-rights-4",
+              "guide-ontarios-standard-lease-20",
+              "guide-ontarios-standard-lease-15",
+              "resources-3",
+              "before-you-rent-3"
+            ],
+            "faqScores": [
+              12.6,
+              7.41,
+              5.99
+            ],
+            "sourceScores": [
+              11.34,
+              8.41,
+              7.92,
+              7.43,
+              6.27
+            ],
+            "ms": 2.0729
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 4.3675
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:24:47.733Z"
+      },
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "maintenance",
+              "priority": "high",
+              "summary": "Landlord has ignored three emails since December about a broken heater, leaving the student without heat."
+            },
+            "error": null,
+            "priority": "high"
+          },
+          {
+            "tool": "escalate_ticket",
+            "args": {
+              "reason": "Broken heater ignored since December, essential service missing, high safety risk",
+              "ticketId": "T-f7dbaf1f"
+            },
+            "error": null,
+            "priority": null
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off‑Campus Housing Team,\n\nI am writing on behalf of a student who has been without heat since December. The student has sent three separate emails to their landlord reporting a broken heater, but the landlord has not responded or arranged any repairs. The lack of heating makes the living environment unsafe, especially given the winter season.\n\nCould you please intervene on the student's behalf to ensure that the landlord promptly addresses the heater repair or provides alternative accommodation if the issue cannot be resolved quickly? The student is experiencing significant discomfort and potential health risks due to the cold.\n\nThank you for your urgent attention to this matter.\n\nSincerely,\n[Student Support Team]\n",
+              "office": "off_campus_housing",
+              "subject": "Urgent: Unresolved Heater Issue – Immediate Assistance Needed",
+              "ticketId": "T-f7dbaf1f"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "escalate_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 4,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "high",
+            "escalated": true,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 3114.8126,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1242,
+            "waitMs": 0,
+            "usage": {
+              "input": 839,
+              "output": 291
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"maintenance\",\"priority\":\"high\",\"summary\":\"Landlord has ignored three emails since December about a broken heater, leaving the student without heat.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 730,
+            "waitMs": 0,
+            "usage": {
+              "input": 1147,
+              "output": 72
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "escalate_ticket",
+                "arguments": "{\"reason\":\"Broken heater ignored since December, essential service missing, high safety risk\",\"ticketId\":\"T-f7dbaf1f\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 664,
+            "waitMs": 0,
+            "usage": {
+              "input": 1259,
+              "output": 222
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off‑Campus Housing Team,\\n\\nI am writing on behalf of a student who has been without heat since December. The student has sent three separate emails to their landlord reporting a broken heater, but the landlord has not responded or arranged any repairs. The lack of heating makes the living environment unsafe, especially given the winter season.\\n\\nCould you please intervene on the student's behalf to ensure that the landlord promptly addresses the heater repair or provides alternative accommodation if the issue cannot be resolved quickly? The student is experiencing significant discomfort and potential health risks due to the cold.\\n\\nThank you for your urgent attention to this matter.\\n\\nSincerely,\\n[Student Support Team]\\n\",\"office\":\"off_campus_housing\",\"subject\":\"Urgent: Unresolved Heater Issue – Immediate Assistance Needed\",\"ticketId\":\"T-f7dbaf1f\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 473,
+            "waitMs": 0,
+            "usage": {
+              "input": 1506,
+              "output": 52
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-landlord-harassing-texts",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [],
+            "sourceIds": [],
+            "faqScores": [],
+            "sourceScores": [],
+            "ms": 0.6945
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [],
+            "sourceIds": [],
+            "faqScores": [],
+            "sourceScores": [],
+            "ms": 0.8203
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.0693
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:25:51.374Z"
+      },
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "harassment",
+              "priority": "high",
+              "summary": "Landlord harassing student with 2am texts demanding they move out"
+            },
+            "error": null,
+            "priority": "high"
+          },
+          {
+            "tool": "escalate_ticket",
+            "args": {
+              "reason": "Student experiencing harassment from landlord with late-night texts demanding they move out, posing a risk to wellbeing",
+              "ticketId": "T-0656a571"
+            },
+            "error": null,
+            "priority": null
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off-Campus Housing Office,\n\nI am writing on behalf of a student who has reported that their landlord has been sending harassing text messages at 2 a.m., demanding that the student move out. This ongoing intimidation is causing significant stress and concerns about the student's housing security.\n\nThe student would like guidance on how to address this harassment, understand their rights, and explore options for safe and stable housing. Any assistance or resources you can provide would be greatly appreciated.\n\nThank you for your prompt attention to this matter.\n\nSincerely,\n[Student Support Team]",
+              "office": "off_campus_housing",
+              "subject": "Assistance needed: Landlord harassment via late-night texts",
+              "ticketId": "T-0656a571"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "escalate_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 4,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "high",
+            "escalated": true,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 6782.186099999999,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 897,
+            "waitMs": 0,
+            "usage": {
+              "input": 840,
+              "output": 331
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"harassment\",\"priority\":\"high\",\"summary\":\"Landlord harassing student with 2am texts demanding they move out\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1105,
+            "waitMs": 56043,
+            "usage": {
+              "input": 1186,
+              "output": 73
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "escalate_ticket",
+                "arguments": "{\"reason\":\"Student experiencing harassment from landlord with late-night texts demanding they move out, posing a risk to wellbeing\",\"ticketId\":\"T-0656a571\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 726,
+            "waitMs": 257,
+            "usage": {
+              "input": 1298,
+              "output": 198
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off-Campus Housing Office,\\n\\nI am writing on behalf of a student who has reported that their landlord has been sending harassing text messages at 2 a.m., demanding that the student move out. This ongoing intimidation is causing significant stress and concerns about the student's housing security.\\n\\nThe student would like guidance on how to address this harassment, understand their rights, and explore options for safe and stable housing. Any assistance or resources you can provide would be greatly appreciated.\\n\\nThank you for your prompt attention to this matter.\\n\\nSincerely,\\n[Student Support Team]\",\"office\":\"off_campus_housing\",\"subject\":\"Assistance needed: Landlord harassment via late-night texts\",\"ticketId\":\"T-0656a571\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 4053,
+            "waitMs": 549,
+            "usage": {
+              "input": 1521,
+              "output": 70
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-black-mold",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-tenant-rights",
+              "faq-legal-support"
+            ],
+            "sourceIds": [
+              "guide-ontarios-standard-lease-20",
+              "know-your-rights-4",
+              "guide-ontarios-standard-lease-15",
+              "resources-3",
+              "know-your-rights-1"
+            ],
+            "faqScores": [
+              10.87,
+              5.99,
+              5.22
+            ],
+            "sourceScores": [
+              8.41,
+              7.95,
+              7.92,
+              7.43,
+              6.91
+            ],
+            "ms": 0.74
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-tenant-rights",
+              "faq-legal-support"
+            ],
+            "sourceIds": [
+              "guide-ontarios-standard-lease-20",
+              "know-your-rights-4",
+              "guide-ontarios-standard-lease-15",
+              "resources-3",
+              "know-your-rights-1"
+            ],
+            "faqScores": [
+              10.87,
+              5.99,
+              5.22
+            ],
+            "sourceScores": [
+              8.41,
+              7.95,
+              7.92,
+              7.43,
+              6.91
+            ],
+            "ms": 0.9522
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.0502
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:26:51.017Z"
+      },
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "maintenance",
+              "priority": "high",
+              "summary": "Black mold growing in bedroom; landlord claims it's the student's problem."
+            },
+            "error": null,
+            "priority": "high"
+          },
+          {
+            "tool": "escalate_ticket",
+            "args": {
+              "reason": "Health hazard due to black mold; landlord refusing responsibility, making home unsafe",
+              "ticketId": "T-730b9a46"
+            },
+            "error": null,
+            "priority": null
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off‑Campus Housing Office,\n\nI am writing regarding a serious health and safety concern in my off‑campus residence. There is black mold growing in my bedroom, and my landlord has told me that it is my problem to resolve. This situation makes the living environment unsafe and potentially hazardous to my health.\n\nI would greatly appreciate your assistance in addressing this issue, including guidance on my rights, possible remediation steps, and any support the university can provide to ensure the mold is properly removed and the landlord complies with health and safety regulations.\n\nThank you for your prompt attention to this matter.\n\nSincerely,\n[Student Name]\n[Student ID]\n[Contact Information]",
+              "office": "off_campus_housing",
+              "subject": "Urgent assistance needed for black mold issue in off‑campus housing",
+              "ticketId": "T-730b9a46"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "escalate_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 4,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "high",
+            "escalated": true,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 8865.325400000002,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 2556,
+            "waitMs": 0,
+            "usage": {
+              "input": 840,
+              "output": 306
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"maintenance\",\"priority\":\"high\",\"summary\":\"Black mold growing in bedroom; landlord claims it's the student's problem.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 294,
+            "waitMs": 0,
+            "usage": {
+              "input": 1163,
+              "output": 49
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "escalate_ticket",
+                "arguments": "{\"reason\":\"Health hazard due to black mold; landlord refusing responsibility, making home unsafe\",\"ticketId\":\"T-730b9a46\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1154,
+            "waitMs": 50494,
+            "usage": {
+              "input": 1255,
+              "output": 224
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off‑Campus Housing Office,\\n\\nI am writing regarding a serious health and safety concern in my off‑campus residence. There is black mold growing in my bedroom, and my landlord has told me that it is my problem to resolve. This situation makes the living environment unsafe and potentially hazardous to my health.\\n\\nI would greatly appreciate your assistance in addressing this issue, including guidance on my rights, possible remediation steps, and any support the university can provide to ensure the mold is properly removed and the landlord complies with health and safety regulations.\\n\\nThank you for your prompt attention to this matter.\\n\\nSincerely,\\n[Student Name]\\n[Student ID]\\n[Contact Information]\",\"office\":\"off_campus_housing\",\"subject\":\"Urgent assistance needed for black mold issue in off‑campus housing\",\"ticketId\":\"T-730b9a46\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 4860,
+            "waitMs": 256,
+            "usage": {
+              "input": 1505,
+              "output": 67
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-illegal-eviction-scared",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [],
+            "sourceIds": [],
+            "faqScores": [],
+            "sourceScores": [],
+            "ms": 0.7908
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [],
+            "sourceIds": [],
+            "faqScores": [],
+            "sourceScores": [],
+            "ms": 0.8265
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.0564
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:27:46.796Z"
+      },
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "landlord_dispute",
+              "priority": "high",
+              "summary": "Landlord threatening illegal eviction; student is scared and at risk of losing housing."
+            },
+            "error": null,
+            "priority": "high"
+          },
+          {
+            "tool": "escalate_ticket",
+            "args": {
+              "reason": "Landlord threatening illegal eviction, student scared; risk of immediate loss of housing",
+              "ticketId": "T-59679230"
+            },
+            "error": null,
+            "priority": null
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off-Campus Housing Office,\n\nI am writing on behalf of a student who has reported that their landlord is threatening an illegal eviction. The student is understandably scared and at risk of losing their housing. They need immediate guidance on their rights, possible legal recourse, and any emergency housing options available.\n\nCould you please advise the student on next steps, including how to contest the eviction, any temporary shelter resources, and contact information for legal assistance?\n\nThank you for your prompt attention to this urgent matter.\n\nSincerely,\nStudent Support Team",
+              "office": "off_campus_housing",
+              "subject": "Urgent assistance needed: illegal eviction threat",
+              "ticketId": "T-59679230"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "escalate_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 4,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "high",
+            "escalated": true,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 4279.817499999997,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 867,
+            "waitMs": 0,
+            "usage": {
+              "input": 836,
+              "output": 270
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"landlord_dispute\",\"priority\":\"high\",\"summary\":\"Landlord threatening illegal eviction; student is scared and at risk of losing housing.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 437,
+            "waitMs": 0,
+            "usage": {
+              "input": 1121,
+              "output": 62
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "escalate_ticket",
+                "arguments": "{\"reason\":\"Landlord threatening illegal eviction, student scared; risk of immediate loss of housing\",\"ticketId\":\"T-59679230\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 981,
+            "waitMs": 1682,
+            "usage": {
+              "input": 1224,
+              "output": 194
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off-Campus Housing Office,\\n\\nI am writing on behalf of a student who has reported that their landlord is threatening an illegal eviction. The student is understandably scared and at risk of losing their housing. They need immediate guidance on their rights, possible legal recourse, and any emergency housing options available.\\n\\nCould you please advise the student on next steps, including how to contest the eviction, any temporary shelter resources, and contact information for legal assistance?\\n\\nThank you for your prompt attention to this urgent matter.\\n\\nSincerely,\\nStudent Support Team\",\"office\":\"off_campus_housing\",\"subject\":\"Urgent assistance needed: illegal eviction threat\",\"ticketId\":\"T-59679230\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1991,
+            "waitMs": 49804,
+            "usage": {
+              "input": 1441,
+              "output": 45
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-draft-och-followup",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-find-off-campus-housing",
+              "faq-tenant-rights",
+              "faq-legal-support",
+              "faq-on-campus-housing"
+            ],
+            "sourceIds": [
+              "help-waterloo-1",
+              "know-your-rights-4",
+              "looking-for-place-1",
+              "looking-for-place-3",
+              "help-waterloo-2"
+            ],
+            "faqScores": [
+              19.23,
+              12.7,
+              8.8,
+              5.86,
+              5.44
+            ],
+            "sourceScores": [
+              13.38,
+              11.9,
+              10.66,
+              10.18,
+              10.06
+            ],
+            "ms": 1.0807
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-utilities",
+              "faq-find-off-campus-housing",
+              "faq-tenant-rights",
+              "faq-parking"
+            ],
+            "sourceIds": [
+              "help-waterloo-1",
+              "know-your-rights-4",
+              "looking-for-place-1",
+              "looking-for-place-3",
+              "help-waterloo-2"
+            ],
+            "faqScores": [
+              19.23,
+              12.84,
+              12.7,
+              8.8,
+              6.48
+            ],
+            "sourceScores": [
+              13.38,
+              11.9,
+              10.66,
+              10.18,
+              10.06
+            ],
+            "ms": 1.7213
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.0554
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:27:55.149Z"
+      },
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "maintenance",
+              "priority": "normal",
+              "summary": "Water leaking through ceiling for a month; landlord has not fixed it; student requests Off-Campus Housing follow-up."
+            },
+            "error": null,
+            "priority": "normal"
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off-Campus Housing Team,\n\nI am writing on behalf of a student who has reported a water leak through their ceiling that has persisted for a month. Despite notifying their landlord, no repairs have been made. The student is requesting assistance in following up with the landlord to ensure the issue is addressed promptly, as the ongoing leak may cause further damage and affect habitability.\n\nCould you please reach out to the landlord on the student's behalf and facilitate a timely resolution?\n\nThank you for your assistance.\n\nBest regards,\nStudent Support Services",
+              "office": "off_campus_housing",
+              "subject": "Follow-up Request: Unresolved Water Leak in Ceiling",
+              "ticketId": "T-3be7f544"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 3,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "normal",
+            "escalated": false,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 4811.1065,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 745,
+            "waitMs": 0,
+            "usage": {
+              "input": 856,
+              "output": 205
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"maintenance\",\"priority\":\"normal\",\"summary\":\"Water leaking through ceiling for a month; landlord has not fixed it; student requests Off-Campus Housing follow-up.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 2074,
+            "waitMs": 3532,
+            "usage": {
+              "input": 1078,
+              "output": 209
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off-Campus Housing Team,\\n\\nI am writing on behalf of a student who has reported a water leak through their ceiling that has persisted for a month. Despite notifying their landlord, no repairs have been made. The student is requesting assistance in following up with the landlord to ensure the issue is addressed promptly, as the ongoing leak may cause further damage and affect habitability.\\n\\nCould you please reach out to the landlord on the student's behalf and facilitate a timely resolution?\\n\\nThank you for your assistance.\\n\\nBest regards,\\nStudent Support Services\",\"office\":\"off_campus_housing\",\"subject\":\"Follow-up Request: Unresolved Water Leak in Ceiling\",\"ticketId\":\"T-3be7f544\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1991,
+            "waitMs": 0,
+            "usage": {
+              "input": 1312,
+              "output": 81
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-wellness-reach-out",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "health_safety",
+            "faqIds": [
+              "faq-mental-health"
+            ],
+            "sourceIds": [],
+            "faqScores": [
+              10.41
+            ],
+            "sourceScores": [],
+            "ms": 0.1598
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-mental-health"
+            ],
+            "sourceIds": [
+              "help-waterloo-1",
+              "before-you-rent-9",
+              "help-waterloo-7",
+              "before-you-rent-18",
+              "know-your-rights-9"
+            ],
+            "faqScores": [
+              10.41
+            ],
+            "sourceScores": [
+              11.24,
+              10.78,
+              10.07,
+              8.94,
+              8.13
+            ],
+            "ms": 1.6523
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.082
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:27:57.550Z"
+      },
+      "live": {
+        "intent": "health_safety",
+        "tools": [],
+        "rawToolCalls": [],
+        "modelTurns": 1,
+        "agentError": "action_agent_failed",
+        "tickets": [],
+        "totalMs": 2394.8256,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 2394,
+            "waitMs": 0,
+            "usage": null,
+            "error": {
+              "status": 400,
+              "message": "400 {\"error\":{\"message\":\"Failed to parse tool call arguments as JSON\",\"type\":\"invalid_request_error\",\"code\":\"tool_use_failed\",\"failed_generation\":\"{\\\"name\\\": \\\"create_ticket\\\", \\\"arguments\\\": {\\n  \\\"c"
+            },
+            "malformed": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-neighbour-threatening",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "health_safety",
+            "faqIds": [
+              "faq-health-emergencies",
+              "faq-safety-procedures"
+            ],
+            "sourceIds": [],
+            "faqScores": [
+              6.03,
+              5.66
+            ],
+            "sourceScores": [],
+            "ms": 0.0976
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-health-emergencies",
+              "faq-safety-procedures"
+            ],
+            "sourceIds": [
+              "resources-7",
+              "residential-rent-increases-3",
+              "residential-rent-increases-4"
+            ],
+            "faqScores": [
+              6.03,
+              5.66
+            ],
+            "sourceScores": [
+              6.54,
+              6.45,
+              6.1
+            ],
+            "ms": 0.8101
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.0794
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:28:53.647Z"
+      },
+      "live": {
+        "intent": "health_safety",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "harassment",
+              "priority": "high",
+              "summary": "Neighbour makes threatening comments whenever the student walks past them."
+            },
+            "error": null,
+            "priority": "high"
+          },
+          {
+            "tool": "escalate_ticket",
+            "args": {
+              "reason": "Ongoing threatening comments from a neighbour constitute harassment and a safety risk.",
+              "ticketId": "T-749860ac"
+            },
+            "error": null,
+            "priority": null
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Special Constable Service,\n\nI am writing on behalf of a student who reports that a neighbour in their building repeatedly makes threatening comments whenever the student walks past. This ongoing harassment is causing the student to feel unsafe in their residence.\n\nCould you please advise on the appropriate steps for the student to report this behaviour formally and any immediate protective measures that can be taken? The student would appreciate guidance on how to document the incidents and any support services available through the university.\n\nThank you for your assistance.\n\nSincerely,\n[Student Support Team]\n",
+              "office": "special_constable_service",
+              "subject": "Urgent: Harassment by neighbour making threatening comments",
+              "ticketId": "T-749860ac"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "escalate_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 4,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "high",
+            "escalated": true,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 2471.798799999997,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 812,
+            "waitMs": 47308,
+            "usage": {
+              "input": 843,
+              "output": 275
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"harassment\",\"priority\":\"high\",\"summary\":\"Neighbour makes threatening comments whenever the student walks past them.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 338,
+            "waitMs": 1180,
+            "usage": {
+              "input": 1133,
+              "output": 64
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "escalate_ticket",
+                "arguments": "{\"reason\":\"Ongoing threatening comments from a neighbour constitute harassment and a safety risk.\",\"ticketId\":\"T-749860ac\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 887,
+            "waitMs": 3946,
+            "usage": {
+              "input": 1235,
+              "output": 195
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Special Constable Service,\\n\\nI am writing on behalf of a student who reports that a neighbour in their building repeatedly makes threatening comments whenever the student walks past. This ongoing harassment is causing the student to feel unsafe in their residence.\\n\\nCould you please advise on the appropriate steps for the student to report this behaviour formally and any immediate protective measures that can be taken? The student would appreciate guidance on how to document the incidents and any support services available through the university.\\n\\nThank you for your assistance.\\n\\nSincerely,\\n[Student Support Team]\\n\",\"office\":\"special_constable_service\",\"subject\":\"Urgent: Harassment by neighbour making threatening comments\",\"ticketId\":\"T-749860ac\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 433,
+            "waitMs": 1184,
+            "usage": {
+              "input": 1453,
+              "output": 63
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-entered-went-through-stuff",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-wusa-legal-protection"
+            ],
+            "sourceIds": [
+              "know-your-rights-5"
+            ],
+            "faqScores": [
+              5.33
+            ],
+            "sourceScores": [
+              7.22
+            ],
+            "ms": 1.6575
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-clubs-connect",
+              "faq-utilities",
+              "faq-wusa-legal-protection"
+            ],
+            "sourceIds": [
+              "know-your-rights-5"
+            ],
+            "faqScores": [
+              5.77,
+              5.38,
+              5.33
+            ],
+            "sourceScores": [
+              7.22
+            ],
+            "ms": 1.3721
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.0551
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:29:45.736Z"
+      },
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "landlord_dispute",
+              "priority": "normal",
+              "summary": "Landlord entered my room three times this week without notice and went through my belongings."
+            },
+            "error": null,
+            "priority": "normal"
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          }
+        ],
+        "modelTurns": 2,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "normal",
+            "escalated": false,
+            "drafts": 0
+          }
+        ],
+        "totalMs": 2466.5046999999977,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1653,
+            "waitMs": 1554,
+            "usage": {
+              "input": 843,
+              "output": 233
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"landlord_dispute\",\"priority\":\"normal\",\"summary\":\"Landlord entered my room three times this week without notice and went through my belongings.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 814,
+            "waitMs": 48057,
+            "usage": {
+              "input": 1093,
+              "output": 54
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-broken-front-lock",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-residence-lockers",
+              "faq-tenant-rights",
+              "faq-storage-belongings",
+              "faq-legal-support"
+            ],
+            "sourceIds": [
+              "resources-6",
+              "know-your-rights-4",
+              "before-you-rent-3",
+              "guide-ontarios-standard-lease-20",
+              "guide-ontarios-standard-lease-15"
+            ],
+            "faqScores": [
+              22.16,
+              9.4,
+              8.11,
+              7.06,
+              5.22
+            ],
+            "sourceScores": [
+              13.44,
+              10.5,
+              10.35,
+              8.41,
+              7.92
+            ],
+            "ms": 0.5023
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-residence-lockers",
+              "faq-tenant-rights",
+              "faq-storage-belongings",
+              "faq-clubs-connect"
+            ],
+            "sourceIds": [
+              "resources-6",
+              "know-your-rights-4",
+              "before-you-rent-3",
+              "guide-ontarios-standard-lease-20",
+              "guide-ontarios-standard-lease-15"
+            ],
+            "faqScores": [
+              22.16,
+              9.4,
+              8.11,
+              7.06,
+              6.58
+            ],
+            "sourceScores": [
+              13.44,
+              10.5,
+              10.35,
+              8.41,
+              7.92
+            ],
+            "ms": 0.5847
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.0566
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:29:55.772Z"
+      },
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "safety_concern",
+              "priority": "high",
+              "summary": "Front door lock broken for two weeks; landlord unresponsive; student feels unsafe."
+            },
+            "error": null,
+            "priority": "high"
+          },
+          {
+            "tool": "escalate_ticket",
+            "args": {
+              "reason": "Front door lock broken, landlord unresponsive, student feels unsafe; home security risk",
+              "ticketId": "T-f7879d71"
+            },
+            "error": null,
+            "priority": null
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off‑Campus Housing Team,\n\nI am writing on behalf of a student who has reported that the front door lock of their rental unit has been broken for two weeks. Despite multiple requests, the landlord has not arranged for repairs, leaving the student feeling unsafe in their home.\n\nGiven the security risk, we kindly ask for your assistance in:\n1. Contacting the landlord to expedite the lock repair.\n2. Advising the student on any immediate safety measures they can take.\n3. Providing information on their rights and possible recourse under local housing regulations.\n\nPlease let us know if any additional information is needed.\n\nThank you for your prompt attention to this matter.\n\nSincerely,\nStudent Support Team",
+              "office": "off_campus_housing",
+              "subject": "Urgent: Front Door Lock Not Repaired – Safety Concern",
+              "ticketId": "T-f7879d71"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "escalate_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 4,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "high",
+            "escalated": true,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 4238.688700000001,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 2786,
+            "waitMs": 1163,
+            "usage": {
+              "input": 850,
+              "output": 313
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"safety_concern\",\"priority\":\"high\",\"summary\":\"Front door lock broken for two weeks; landlord unresponsive; student feels unsafe.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 318,
+            "waitMs": 1500,
+            "usage": {
+              "input": 1179,
+              "output": 73
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "escalate_ticket",
+                "arguments": "{\"reason\":\"Front door lock broken, landlord unresponsive, student feels unsafe; home security risk\",\"ticketId\":\"T-f7879d71\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 630,
+            "waitMs": 1758,
+            "usage": {
+              "input": 1291,
+              "output": 236
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off‑Campus Housing Team,\\n\\nI am writing on behalf of a student who has reported that the front door lock of their rental unit has been broken for two weeks. Despite multiple requests, the landlord has not arranged for repairs, leaving the student feeling unsafe in their home.\\n\\nGiven the security risk, we kindly ask for your assistance in:\\n1. Contacting the landlord to expedite the lock repair.\\n2. Advising the student on any immediate safety measures they can take.\\n3. Providing information on their rights and possible recourse under local housing regulations.\\n\\nPlease let us know if any additional information is needed.\\n\\nThank you for your prompt attention to this matter.\\n\\nSincerely,\\nStudent Support Team\",\"office\":\"off_campus_housing\",\"subject\":\"Urgent: Front Door Lock Not Repaired – Safety Concern\",\"ticketId\":\"T-f7879d71\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 504,
+            "waitMs": 1363,
+            "usage": {
+              "input": 1551,
+              "output": 75
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-roommate-stole-laptop",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [],
+            "sourceIds": [],
+            "faqScores": [],
+            "sourceScores": [],
+            "ms": 0.4514
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [],
+            "sourceIds": [],
+            "faqScores": [],
+            "sourceScores": [],
+            "ms": 0.5223
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.0469
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:30:53.938Z"
+      },
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "landlord_dispute",
+              "priority": "normal",
+              "summary": "Roommate stole laptop and moved out, student seeks guidance."
+            },
+            "error": null,
+            "priority": "normal"
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Community Legal Services,\n\nI am writing on behalf of a student who reports that their roommate has stolen their laptop and subsequently moved out of the shared accommodation. The student is seeking guidance on the appropriate steps to take, including how to report the theft to the police, any options for recovering the property, and advice on any legal recourse they may have against the former roommate.\n\nCould you please advise the student on the next steps they should follow and any resources or support services available to them?\n\nThank you for your assistance.\n\nSincerely,\nStudent Support Team",
+              "office": "community_legal_services",
+              "subject": "Assistance needed: roommate theft of laptop",
+              "ticketId": "T-68a139bc"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 3,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "normal",
+            "escalated": false,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 3161.279999999999,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1304,
+            "waitMs": 51192,
+            "usage": {
+              "input": 836,
+              "output": 436
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"landlord_dispute\",\"priority\":\"normal\",\"summary\":\"Roommate stole laptop and moved out, student seeks guidance.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1250,
+            "waitMs": 2979,
+            "usage": {
+              "input": 1288,
+              "output": 226
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Community Legal Services,\\n\\nI am writing on behalf of a student who reports that their roommate has stolen their laptop and subsequently moved out of the shared accommodation. The student is seeking guidance on the appropriate steps to take, including how to report the theft to the police, any options for recovering the property, and advice on any legal recourse they may have against the former roommate.\\n\\nCould you please advise the student on the next steps they should follow and any resources or support services available to them?\\n\\nThank you for your assistance.\\n\\nSincerely,\\nStudent Support Team\",\"office\":\"community_legal_services\",\"subject\":\"Assistance needed: roommate theft of laptop\",\"ticketId\":\"T-68a139bc\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 605,
+            "waitMs": 821,
+            "usage": {
+              "input": 1539,
+              "output": 50
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-none-inspection-frequency",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [],
+            "sourceIds": [],
+            "faqScores": [],
+            "sourceScores": [],
+            "ms": 0.4122
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [],
+            "sourceIds": [],
+            "faqScores": [],
+            "sourceScores": [],
+            "ms": 0.561
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.0555
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:30:55.680Z"
+      },
+      "live": {
+        "intent": "housing",
+        "tools": [],
+        "rawToolCalls": [],
+        "modelTurns": 1,
+        "agentError": null,
+        "tickets": [],
+        "totalMs": 359.3267000000001,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 359,
+            "waitMs": 1370,
+            "usage": {
+              "input": 835,
+              "output": 50
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-none-hypothetical-heat",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-tenant-rights",
+              "faq-legal-support"
+            ],
+            "sourceIds": [
+              "guide-ontarios-standard-lease-20",
+              "know-your-rights-4",
+              "guide-ontarios-standard-lease-15",
+              "resources-3",
+              "before-you-rent-3"
+            ],
+            "faqScores": [
+              17.93,
+              5.99,
+              5.22
+            ],
+            "sourceScores": [
+              8.41,
+              7.95,
+              7.92,
+              7.43,
+              6.27
+            ],
+            "ms": 0.6106
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-tenant-rights",
+              "faq-legal-support"
+            ],
+            "sourceIds": [
+              "guide-ontarios-standard-lease-20",
+              "know-your-rights-4",
+              "guide-ontarios-standard-lease-15",
+              "resources-3",
+              "before-you-rent-3"
+            ],
+            "faqScores": [
+              17.93,
+              5.99,
+              5.22
+            ],
+            "sourceScores": [
+              8.41,
+              7.95,
+              7.92,
+              7.43,
+              6.27
+            ],
+            "ms": 0.449
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.0512
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:30:56.138Z"
+      },
+      "live": {
+        "intent": "housing",
+        "tools": [],
+        "rawToolCalls": [],
+        "modelTurns": 1,
+        "agentError": null,
+        "tickets": [],
+        "totalMs": 448.9927,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 449,
+            "waitMs": 0,
+            "usage": {
+              "input": 842,
+              "output": 58
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-none-normal-notice",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-storage-lockers"
+            ],
+            "sourceIds": [
+              "signing-lease-9",
+              "renting-ontario-your-rights-6",
+              "signing-lease-8"
+            ],
+            "faqScores": [
+              6.08
+            ],
+            "sourceScores": [
+              11.46,
+              7.55,
+              6.4
+            ],
+            "ms": 0.3315
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-storage-lockers"
+            ],
+            "sourceIds": [
+              "signing-lease-9",
+              "renting-ontario-your-rights-6",
+              "signing-lease-8"
+            ],
+            "faqScores": [
+              6.08
+            ],
+            "sourceScores": [
+              11.46,
+              7.55,
+              6.4
+            ],
+            "ms": 0.4162
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.0437
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:31:47.342Z"
+      },
+      "live": {
+        "intent": "housing",
+        "tools": [],
+        "rawToolCalls": [],
+        "modelTurns": 1,
+        "agentError": null,
+        "tickets": [],
+        "totalMs": 311.38840000000346,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 312,
+            "waitMs": 50884,
+            "usage": {
+              "input": 834,
+              "output": 52
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-none-friend-mental-health",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "health_safety",
+            "faqIds": [
+              "faq-mental-health",
+              "faq-health-services",
+              "faq-health-insurance"
+            ],
+            "sourceIds": [],
+            "faqScores": [
+              11.18,
+              6.34,
+              6
+            ],
+            "sourceScores": [],
+            "ms": 0.0315
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-mental-health",
+              "faq-health-services",
+              "faq-health-insurance"
+            ],
+            "sourceIds": [
+              "help-waterloo-7"
+            ],
+            "faqScores": [
+              11.18,
+              6.34,
+              6
+            ],
+            "sourceScores": [
+              12.71
+            ],
+            "ms": 0.3957
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.0397
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:31:51.620Z"
+      },
+      "live": {
+        "intent": "health_safety",
+        "tools": [],
+        "rawToolCalls": [],
+        "modelTurns": 1,
+        "agentError": null,
+        "tickets": [],
+        "totalMs": 295.14429999999993,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 295,
+            "waitMs": 3974,
+            "usage": {
+              "input": 837,
+              "output": 67
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-none-mold-prevention",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-tenant-rights",
+              "faq-legal-support",
+              "faq-joint-lease"
+            ],
+            "sourceIds": [
+              "guide-ontarios-standard-lease-15",
+              "know-your-rights-4",
+              "guide-ontarios-standard-lease-20",
+              "before-you-rent-3",
+              "resources-3"
+            ],
+            "faqScores": [
+              14.5,
+              11.91,
+              7.62,
+              5.59
+            ],
+            "sourceScores": [
+              10.47,
+              9.67,
+              9.39,
+              8.58,
+              7.43
+            ],
+            "ms": 0.3671
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-tenant-rights",
+              "faq-legal-support",
+              "faq-joint-lease"
+            ],
+            "sourceIds": [
+              "guide-ontarios-standard-lease-15",
+              "know-your-rights-4",
+              "guide-ontarios-standard-lease-20",
+              "before-you-rent-3",
+              "resources-3"
+            ],
+            "faqScores": [
+              14.5,
+              11.91,
+              7.62,
+              5.59
+            ],
+            "sourceScores": [
+              10.47,
+              9.67,
+              9.39,
+              8.58,
+              7.43
+            ],
+            "ms": 0.4814
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.0983
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "cached": {
+        "status": "fresh",
+        "recordedAt": "2026-10-03T04:31:52.405Z"
+      },
+      "live": {
+        "intent": "housing",
+        "tools": [],
+        "rawToolCalls": [],
+        "modelTurns": 1,
+        "agentError": null,
+        "tickets": [],
+        "totalMs": 773.8396,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 774,
+            "waitMs": 0,
+            "usage": {
+              "input": 844,
+              "output": 45
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-key-deposit-unreturned",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance"
+            ],
+            "sourceIds": [
+              "know-your-rights-2",
+              "before-you-rent-20",
+              "guide-ontarios-standard-lease-11",
+              "before-you-rent-21",
+              "signing-lease-13"
+            ],
+            "faqScores": [
+              6.52
+            ],
+            "sourceScores": [
+              14.01,
+              13.42,
+              11.99,
+              11.73,
+              9.71
+            ],
+            "ms": 0.3269
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-utilities"
+            ],
+            "sourceIds": [
+              "know-your-rights-2",
+              "before-you-rent-20",
+              "guide-ontarios-standard-lease-11",
+              "before-you-rent-21",
+              "signing-lease-13"
+            ],
+            "faqScores": [
+              6.52,
+              6.38
+            ],
+            "sourceScores": [
+              14.01,
+              13.42,
+              11.99,
+              11.73,
+              9.71
+            ],
+            "ms": 0.4061
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.0425
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "landlord_dispute",
+              "priority": "normal",
+              "summary": "Landlord has not returned key deposit two months after move-out."
+            },
+            "error": null,
+            "priority": "normal"
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off‑Campus Housing Office,\n\nI am writing regarding a landlord dispute where my former landlord has not returned my key deposit despite it being two months since I moved out. I have attempted to contact them without success. I would appreciate guidance on how to proceed, including any steps I can take to recover the deposit or any support services the university can provide.\n\nThank you for your assistance.\n\nSincerely,\n[Student Name]",
+              "office": "off_campus_housing",
+              "subject": "Assistance needed: Unreturned key deposit after moving out",
+              "ticketId": "T-0770d9df"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 3,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "normal",
+            "escalated": false,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 2815.0941,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1733,
+            "waitMs": 0,
+            "usage": {
+              "input": 840,
+              "output": 254
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"landlord_dispute\",\"priority\":\"normal\",\"summary\":\"Landlord has not returned key deposit two months after move-out.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 744,
+            "waitMs": 0,
+            "usage": {
+              "input": 1111,
+              "output": 177
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off‑Campus Housing Office,\\n\\nI am writing regarding a landlord dispute where my former landlord has not returned my key deposit despite it being two months since I moved out. I have attempted to contact them without success. I would appreciate guidance on how to proceed, including any steps I can take to recover the deposit or any support services the university can provide.\\n\\nThank you for your assistance.\\n\\nSincerely,\\n[Student Name]\",\"office\":\"off_campus_housing\",\"subject\":\"Assistance needed: Unreturned key deposit after moving out\",\"ticketId\":\"T-0770d9df\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 320,
+            "waitMs": 0,
+            "usage": {
+              "input": 1326,
+              "output": 64
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-dryer-broken",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-tenant-rights",
+              "faq-legal-support"
+            ],
+            "sourceIds": [
+              "know-your-rights-4",
+              "guide-ontarios-standard-lease-15",
+              "guide-ontarios-standard-lease-20",
+              "resources-3",
+              "renting-ontario-your-rights-11"
+            ],
+            "faqScores": [
+              15.5,
+              11.06,
+              5.22
+            ],
+            "sourceScores": [
+              11.64,
+              9.76,
+              8.41,
+              7.43,
+              6.73
+            ],
+            "ms": 3.0017
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-tenant-rights",
+              "faq-noise-bylaws",
+              "faq-utilities",
+              "faq-legal-support"
+            ],
+            "sourceIds": [
+              "know-your-rights-4",
+              "guide-ontarios-standard-lease-15",
+              "guide-ontarios-standard-lease-20",
+              "resources-3",
+              "renting-ontario-your-rights-11"
+            ],
+            "faqScores": [
+              15.5,
+              11.06,
+              5.52,
+              5.38,
+              5.22
+            ],
+            "sourceScores": [
+              11.64,
+              9.76,
+              8.41,
+              7.43,
+              6.73
+            ],
+            "ms": 3.988
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.2515
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "maintenance",
+              "priority": "normal",
+              "summary": "Dryer in unit broken for three weeks; landlord repeatedly delays repair."
+            },
+            "error": null,
+            "priority": "normal"
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off‑Campus Housing Office,\n\nI am writing regarding a maintenance issue in my rental unit that has remained unresolved for three weeks. The dryer has been broken, and despite repeated requests, my landlord has only responded with vague promises that it will be fixed \"next week,\" which has not happened.\n\nThis ongoing problem is affecting my ability to manage laundry and is causing inconvenience. I would appreciate any assistance you can provide in facilitating a timely repair or advising on my rights in this situation.\n\nThank you for your help.\n\nSincerely,\n[Student Name]",
+              "office": "off_campus_housing",
+              "subject": "Assistance needed for unresolved dryer repair in rental unit",
+              "ticketId": "T-9906bb49"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 3,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "normal",
+            "escalated": false,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 6561.429700000001,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1252,
+            "waitMs": 0,
+            "usage": {
+              "input": 844,
+              "output": 224
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"maintenance\",\"priority\":\"normal\",\"summary\":\"Dryer in unit broken for three weeks; landlord repeatedly delays repair.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 904,
+            "waitMs": 0,
+            "usage": {
+              "input": 1084,
+              "output": 200
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off‑Campus Housing Office,\\n\\nI am writing regarding a maintenance issue in my rental unit that has remained unresolved for three weeks. The dryer has been broken, and despite repeated requests, my landlord has only responded with vague promises that it will be fixed \\\"next week,\\\" which has not happened.\\n\\nThis ongoing problem is affecting my ability to manage laundry and is causing inconvenience. I would appreciate any assistance you can provide in facilitating a timely repair or advising on my rights in this situation.\\n\\nThank you for your help.\\n\\nSincerely,\\n[Student Name]\",\"office\":\"off_campus_housing\",\"subject\":\"Assistance needed for unresolved dryer repair in rental unit\",\"ticketId\":\"T-9906bb49\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 4404,
+            "waitMs": 55074,
+            "usage": {
+              "input": 1321,
+              "output": 65
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-cleaning-fee",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance"
+            ],
+            "sourceIds": [
+              "renting-ontario-your-rights-6",
+              "guide-ontarios-standard-lease-16"
+            ],
+            "faqScores": [
+              7.92
+            ],
+            "sourceScores": [
+              7.08,
+              6.12
+            ],
+            "ms": 5.5267
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance"
+            ],
+            "sourceIds": [
+              "renting-ontario-your-rights-6",
+              "guide-ontarios-standard-lease-16"
+            ],
+            "faqScores": [
+              7.92
+            ],
+            "sourceScores": [
+              7.08,
+              6.12
+            ],
+            "ms": 6.5519
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 18.498
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "landlord_dispute",
+              "priority": "normal",
+              "summary": "Landlord charged a $200 cleaning fee upon move-out and refuses to explain."
+            },
+            "error": null,
+            "priority": "normal"
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          }
+        ],
+        "modelTurns": 2,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "normal",
+            "escalated": false,
+            "drafts": 0
+          }
+        ],
+        "totalMs": 4360.5625,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 2727,
+            "waitMs": 0,
+            "usage": {
+              "input": 843,
+              "output": 147
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"landlord_dispute\",\"priority\":\"normal\",\"summary\":\"Landlord charged a $200 cleaning fee upon move-out and refuses to explain.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1633,
+            "waitMs": 0,
+            "usage": {
+              "input": 1006,
+              "output": 47
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-short-notice-inspections",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-tenant-rights",
+              "faq-landlord-maintenance"
+            ],
+            "sourceIds": [
+              "know-your-rights-5",
+              "guide-ontarios-standard-lease-5"
+            ],
+            "faqScores": [
+              10.51,
+              7.28
+            ],
+            "sourceScores": [
+              12.64,
+              7.14
+            ],
+            "ms": 2.2009
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-tenant-rights",
+              "faq-landlord-maintenance"
+            ],
+            "sourceIds": [
+              "know-your-rights-5",
+              "guide-ontarios-standard-lease-5"
+            ],
+            "faqScores": [
+              10.51,
+              7.28
+            ],
+            "sourceScores": [
+              12.64,
+              7.14
+            ],
+            "ms": 3.0802
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.5177
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "landlord_dispute",
+              "priority": "normal",
+              "summary": "Landlord conducting inspections with only a few hours' notice."
+            },
+            "error": null,
+            "priority": "normal"
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          }
+        ],
+        "modelTurns": 2,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "normal",
+            "escalated": false,
+            "drafts": 0
+          }
+        ],
+        "totalMs": 3194.4573,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 2120,
+            "waitMs": 1,
+            "usage": {
+              "input": 841,
+              "output": 269
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"landlord_dispute\",\"priority\":\"normal\",\"summary\":\"Landlord conducting inspections with only a few hours' notice.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1074,
+            "waitMs": 1,
+            "usage": {
+              "input": 1127,
+              "output": 51
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-roommate-internet-unpaid",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-find-off-campus-housing"
+            ],
+            "sourceIds": [
+              "before-you-rent-5"
+            ],
+            "faqScores": [
+              9.76
+            ],
+            "sourceScores": [
+              8.88
+            ],
+            "ms": 2.5029
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-find-off-campus-housing"
+            ],
+            "sourceIds": [
+              "before-you-rent-5"
+            ],
+            "faqScores": [
+              9.76
+            ],
+            "sourceScores": [
+              8.88
+            ],
+            "ms": 1.8228
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.2185
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "landlord_dispute",
+              "priority": "normal",
+              "summary": "Roommate hasn't paid their share of the internet for three months and is unresponsive."
+            },
+            "error": null,
+            "priority": "normal"
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off‑Campus Housing Office,\n\nI am writing regarding an ongoing issue with my roommate. They have not paid their share of the internet bill for the past three months, and despite multiple attempts to contact them, they have not responded. This has left me covering the full cost and has caused significant frustration.\n\nI would appreciate any guidance or support you can provide on how to resolve this dispute, including possible mediation services or steps I can take to ensure fair cost sharing moving forward.\n\nThank you for your assistance.\n\nSincerely,\n[Student Name]",
+              "office": "off_campus_housing",
+              "subject": "Assistance needed with roommate internet payment dispute",
+              "ticketId": "T-2fc44279"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 3,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "normal",
+            "escalated": false,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 2615.787199999999,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1568,
+            "waitMs": 48017,
+            "usage": {
+              "input": 843,
+              "output": 434
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"landlord_dispute\",\"priority\":\"normal\",\"summary\":\"Roommate hasn't paid their share of the internet for three months and is unresponsive.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 710,
+            "waitMs": 2901,
+            "usage": {
+              "input": 1293,
+              "output": 204
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off‑Campus Housing Office,\\n\\nI am writing regarding an ongoing issue with my roommate. They have not paid their share of the internet bill for the past three months, and despite multiple attempts to contact them, they have not responded. This has left me covering the full cost and has caused significant frustration.\\n\\nI would appreciate any guidance or support you can provide on how to resolve this dispute, including possible mediation services or steps I can take to ensure fair cost sharing moving forward.\\n\\nThank you for your assistance.\\n\\nSincerely,\\n[Student Name]\",\"office\":\"off_campus_housing\",\"subject\":\"Assistance needed with roommate internet payment dispute\",\"ticketId\":\"T-2fc44279\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 337,
+            "waitMs": 2016,
+            "usage": {
+              "input": 1534,
+              "output": 75
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-window-wont-close",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance"
+            ],
+            "sourceIds": [],
+            "faqScores": [
+              5.42
+            ],
+            "sourceScores": [],
+            "ms": 1.3108
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance"
+            ],
+            "sourceIds": [],
+            "faqScores": [
+              5.42
+            ],
+            "sourceScores": [],
+            "ms": 2.4849
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.2152
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "maintenance",
+              "priority": "normal",
+              "summary": "Window in bedroom does not close properly and landlord is unresponsive to emails."
+            },
+            "error": null,
+            "priority": "normal"
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off-Campus Housing Office,\n\nI am writing to request assistance with a maintenance issue in my off-campus rental. The window in my bedroom does not close properly, which raises concerns about security and weather protection. I have contacted my landlord multiple times via email, but have not received any response.\n\nCould you please advise on the next steps I can take to have this issue addressed promptly? Any guidance on tenant rights or possible mediation would be greatly appreciated.\n\nThank you for your help.\n\nSincerely,\n[Student Name]",
+              "office": "off_campus_housing",
+              "subject": "Unresponsive landlord regarding bedroom window repair",
+              "ticketId": "T-fb91f071"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 3,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "normal",
+            "escalated": false,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 1882.628499999999,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 700,
+            "waitMs": 3413,
+            "usage": {
+              "input": 842,
+              "output": 238
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"maintenance\",\"priority\":\"normal\",\"summary\":\"Window in bedroom does not close properly and landlord is unresponsive to emails.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 721,
+            "waitMs": 0,
+            "usage": {
+              "input": 1096,
+              "output": 218
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off-Campus Housing Office,\\n\\nI am writing to request assistance with a maintenance issue in my off-campus rental. The window in my bedroom does not close properly, which raises concerns about security and weather protection. I have contacted my landlord multiple times via email, but have not received any response.\\n\\nCould you please advise on the next steps I can take to have this issue addressed promptly? Any guidance on tenant rights or possible mediation would be greatly appreciated.\\n\\nThank you for your help.\\n\\nSincerely,\\n[Student Name]\",\"office\":\"off_campus_housing\",\"subject\":\"Unresponsive landlord regarding bedroom window repair\",\"ticketId\":\"T-fb91f071\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 458,
+            "waitMs": 52147,
+            "usage": {
+              "input": 1336,
+              "output": 40
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-leaking-faucet",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-tenant-rights",
+              "faq-legal-support"
+            ],
+            "sourceIds": [
+              "know-your-rights-4",
+              "before-you-rent-3",
+              "guide-ontarios-standard-lease-20",
+              "guide-ontarios-standard-lease-15",
+              "resources-3"
+            ],
+            "faqScores": [
+              15.1,
+              5.99,
+              5.22
+            ],
+            "sourceScores": [
+              10.5,
+              9.93,
+              8.41,
+              7.92,
+              7.43
+            ],
+            "ms": 2.3914
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-tenant-rights",
+              "faq-legal-support"
+            ],
+            "sourceIds": [
+              "know-your-rights-4",
+              "before-you-rent-3",
+              "guide-ontarios-standard-lease-20",
+              "guide-ontarios-standard-lease-15",
+              "resources-3"
+            ],
+            "faqScores": [
+              15.1,
+              5.99,
+              5.22
+            ],
+            "sourceScores": [
+              10.5,
+              9.93,
+              8.41,
+              7.92,
+              7.43
+            ],
+            "ms": 2.0229
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.2186
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "maintenance",
+              "priority": "normal",
+              "summary": "Student has been waiting a month for landlord to fix a leaking kitchen faucet."
+            },
+            "error": null,
+            "priority": "normal"
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          }
+        ],
+        "modelTurns": 2,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "normal",
+            "escalated": false,
+            "drafts": 0
+          }
+        ],
+        "totalMs": 1059.7693,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 784,
+            "waitMs": 0,
+            "usage": {
+              "input": 840,
+              "output": 307
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"maintenance\",\"priority\":\"normal\",\"summary\":\"Student has been waiting a month for landlord to fix a leaking kitchen faucet.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 275,
+            "waitMs": 1468,
+            "usage": {
+              "input": 1165,
+              "output": 39
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-no-lease-copy",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-joint-lease"
+            ],
+            "sourceIds": [
+              "signing-lease-16",
+              "signing-lease-3",
+              "signing-lease-5",
+              "renting-ontario-your-rights-12",
+              "guide-ontarios-standard-lease-19"
+            ],
+            "faqScores": [
+              8.74
+            ],
+            "sourceScores": [
+              10.53,
+              10.3,
+              10.01,
+              8.41,
+              7.81
+            ],
+            "ms": 1.4086
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-joint-lease"
+            ],
+            "sourceIds": [
+              "signing-lease-16",
+              "signing-lease-3",
+              "signing-lease-5",
+              "renting-ontario-your-rights-12",
+              "guide-ontarios-standard-lease-19"
+            ],
+            "faqScores": [
+              8.74
+            ],
+            "sourceScores": [
+              10.53,
+              10.3,
+              10.01,
+              8.41,
+              7.81
+            ],
+            "ms": 2.2244
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.2815
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "landlord_dispute",
+              "priority": "normal",
+              "summary": "Landlord refuses to provide a copy of the lease signed in May."
+            },
+            "error": null,
+            "priority": "normal"
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          }
+        ],
+        "modelTurns": 2,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "normal",
+            "escalated": false,
+            "drafts": 0
+          }
+        ],
+        "totalMs": 882.2803999999996,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 631,
+            "waitMs": 3481,
+            "usage": {
+              "input": 841,
+              "output": 140
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"landlord_dispute\",\"priority\":\"normal\",\"summary\":\"Landlord refuses to provide a copy of the lease signed in May.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 251,
+            "waitMs": 251,
+            "usage": {
+              "input": 999,
+              "output": 50
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-furnace-out-january",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance"
+            ],
+            "sourceIds": [
+              "guide-ontarios-standard-lease-8"
+            ],
+            "faqScores": [
+              7.92
+            ],
+            "sourceScores": [
+              6.5
+            ],
+            "ms": 1.562
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-food-support",
+              "faq-budget-food-campus"
+            ],
+            "sourceIds": [
+              "guide-ontarios-standard-lease-8"
+            ],
+            "faqScores": [
+              7.92,
+              5.53,
+              5.11
+            ],
+            "sourceScores": [
+              6.5
+            ],
+            "ms": 2.4451
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.194
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "maintenance",
+              "priority": "high",
+              "summary": "Furnace has been out for four days in January and landlord is unresponsive."
+            },
+            "error": null,
+            "priority": "high"
+          },
+          {
+            "tool": "escalate_ticket",
+            "args": {
+              "reason": "Essential heating service out in winter, landlord unresponsive, creating unsafe living conditions.",
+              "ticketId": "T-80fe4058"
+            },
+            "error": null,
+            "priority": null
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off-Campus Housing Office,\n\nI am writing on behalf of a student whose furnace has been non‑functional for four days during the winter. The landlord has not responded to any attempts to contact them. This lack of heat makes the living environment unsafe and uninhabitable.\n\nCould you please intervene with the landlord to arrange immediate repairs or provide alternative accommodation options while the issue is resolved?\n\nThank you for your prompt assistance.\n\nSincerely,\n[Student Support Team]",
+              "office": "off_campus_housing",
+              "subject": "Urgent: No heat in January, landlord unresponsive",
+              "ticketId": "T-80fe4058"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "escalate_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 4,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "high",
+            "escalated": true,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 2642.881000000001,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 908,
+            "waitMs": 52425,
+            "usage": {
+              "input": 845,
+              "output": 291
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"maintenance\",\"priority\":\"high\",\"summary\":\"Furnace has been out for four days in January and landlord is unresponsive.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 493,
+            "waitMs": 1,
+            "usage": {
+              "input": 1152,
+              "output": 73
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "escalate_ticket",
+                "arguments": "{\"reason\":\"Essential heating service out in winter, landlord unresponsive, creating unsafe living conditions.\",\"ticketId\":\"T-80fe4058\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 797,
+            "waitMs": 1311,
+            "usage": {
+              "input": 1264,
+              "output": 184
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off-Campus Housing Office,\\n\\nI am writing on behalf of a student whose furnace has been non‑functional for four days during the winter. The landlord has not responded to any attempts to contact them. This lack of heat makes the living environment unsafe and uninhabitable.\\n\\nCould you please intervene with the landlord to arrange immediate repairs or provide alternative accommodation options while the issue is resolved?\\n\\nThank you for your prompt assistance.\\n\\nSincerely,\\n[Student Support Team]\",\"office\":\"off_campus_housing\",\"subject\":\"Urgent: No heat in January, landlord unresponsive\",\"ticketId\":\"T-80fe4058\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 424,
+            "waitMs": 2968,
+            "usage": {
+              "input": 1473,
+              "output": 55
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-landlord-yelling-threats",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance"
+            ],
+            "sourceIds": [
+              "resources-6",
+              "renting-ontario-your-rights-6",
+              "signing-lease-13",
+              "know-your-rights-2"
+            ],
+            "faqScores": [
+              5.16
+            ],
+            "sourceScores": [
+              10.33,
+              7.94,
+              6.95,
+              6.27
+            ],
+            "ms": 1.7698
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-safety-procedures",
+              "faq-noise-bylaws",
+              "faq-landlord-maintenance"
+            ],
+            "sourceIds": [
+              "resources-6",
+              "renting-ontario-your-rights-6",
+              "signing-lease-13",
+              "know-your-rights-2"
+            ],
+            "faqScores": [
+              10.85,
+              6.32,
+              5.16
+            ],
+            "sourceScores": [
+              10.33,
+              7.94,
+              6.95,
+              6.27
+            ],
+            "ms": 3.4882
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 1.551
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "landlord_dispute",
+              "priority": "high",
+              "summary": "Landlord sent threatening messages about eviction and confronted the student at the door yelling last night."
+            },
+            "error": null,
+            "priority": "high"
+          },
+          {
+            "tool": "escalate_ticket",
+            "args": {
+              "reason": "Student reports threatening messages and confrontational behavior from landlord, indicating imminent risk of eviction and harassment.",
+              "ticketId": "T-37375133"
+            },
+            "error": null,
+            "priority": null
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off-Campus Housing Office,\n\nI am writing on behalf of a student who has reported that their landlord has been sending threatening messages about being kicked out and personally showed up at the student's door yelling last night. This behavior constitutes harassment and creates an immediate safety and housing security concern for the student.\n\nThe student is seeking assistance to address the landlord's intimidation, ensure their right to remain in their residence, and obtain guidance on any protective measures or legal recourse available.\n\nPlease advise on the next steps we can take to support the student, including any resources for emergency housing, legal advice, or mediation with the landlord.\n\nThank you for your prompt attention to this matter.\n\nSincerely,\nUniversity of Waterloo Off-Campus Student Support Team",
+              "office": "off_campus_housing",
+              "subject": "Urgent: Landlord harassment and threat of eviction",
+              "ticketId": "T-37375133"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "escalate_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 4,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "high",
+            "escalated": true,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 2456.2295000000013,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 789,
+            "waitMs": 428,
+            "usage": {
+              "input": 846,
+              "output": 305
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"landlord_dispute\",\"priority\":\"high\",\"summary\":\"Landlord sent threatening messages about eviction and confronted the student at the door yelling last night.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 377,
+            "waitMs": 51897,
+            "usage": {
+              "input": 1166,
+              "output": 65
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "escalate_ticket",
+                "arguments": "{\"reason\":\"Student reports threatening messages and confrontational behavior from landlord, indicating imminent risk of eviction and harassment.\",\"ticketId\":\"T-37375133\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1012,
+            "waitMs": 535,
+            "usage": {
+              "input": 1269,
+              "output": 237
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off-Campus Housing Office,\\n\\nI am writing on behalf of a student who has reported that their landlord has been sending threatening messages about being kicked out and personally showed up at the student's door yelling last night. This behavior constitutes harassment and creates an immediate safety and housing security concern for the student.\\n\\nThe student is seeking assistance to address the landlord's intimidation, ensure their right to remain in their residence, and obtain guidance on any protective measures or legal recourse available.\\n\\nPlease advise on the next steps we can take to support the student, including any resources for emergency housing, legal advice, or mediation with the landlord.\\n\\nThank you for your prompt attention to this matter.\\n\\nSincerely,\\nUniversity of Waterloo Off-Campus Student Support Team\",\"office\":\"off_campus_housing\",\"subject\":\"Urgent: Landlord harassment and threat of eviction\",\"ticketId\":\"T-37375133\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 274,
+            "waitMs": 814,
+            "usage": {
+              "input": 1529,
+              "output": 62
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-no-running-water",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance"
+            ],
+            "sourceIds": [
+              "residential-rent-increases-2",
+              "know-your-rights-1",
+              "before-you-rent-22"
+            ],
+            "faqScores": [
+              6.09
+            ],
+            "sourceScores": [
+              7.69,
+              6.91,
+              6.1
+            ],
+            "ms": 1.4242
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-utilities"
+            ],
+            "sourceIds": [
+              "residential-rent-increases-2",
+              "know-your-rights-1",
+              "before-you-rent-22"
+            ],
+            "faqScores": [
+              6.09,
+              5.78
+            ],
+            "sourceScores": [
+              7.69,
+              6.91,
+              6.1
+            ],
+            "ms": 2.9689
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.1445
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "maintenance",
+              "priority": "high",
+              "summary": "No running water since yesterday; landlord says it's not his problem."
+            },
+            "error": null,
+            "priority": "high"
+          },
+          {
+            "tool": "escalate_ticket",
+            "args": {
+              "reason": "Essential service (water) outage; landlord refusing responsibility, making home unsafe",
+              "ticketId": "T-a0b98a99"
+            },
+            "error": null,
+            "priority": null
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off-Campus Housing Office,\n\nI am writing on behalf of a student who has been without running water in their house since yesterday. The landlord has stated that the issue is not his responsibility, leaving the student without an essential service and an unsafe living condition.\n\nCould you please intervene with the landlord to ensure the water supply is restored promptly, and advise the student on any immediate steps they can take for temporary accommodations if the issue cannot be resolved quickly?\n\nThank you for your assistance.\n\nSincerely,\n[Student Support Team]",
+              "office": "off_campus_housing",
+              "subject": "Urgent: No Running Water – Landlord Unresponsive",
+              "ticketId": "T-a0b98a99"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "escalate_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 4,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "high",
+            "escalated": true,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 2755.7010999999984,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 866,
+            "waitMs": 3478,
+            "usage": {
+              "input": 844,
+              "output": 324
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"maintenance\",\"priority\":\"high\",\"summary\":\"No running water since yesterday; landlord says it's not his problem.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 479,
+            "waitMs": 0,
+            "usage": {
+              "input": 1185,
+              "output": 63
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "escalate_ticket",
+                "arguments": "{\"reason\":\"Essential service (water) outage; landlord refusing responsibility, making home unsafe\",\"ticketId\":\"T-a0b98a99\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1055,
+            "waitMs": 53127,
+            "usage": {
+              "input": 1288,
+              "output": 201
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off-Campus Housing Office,\\n\\nI am writing on behalf of a student who has been without running water in their house since yesterday. The landlord has stated that the issue is not his responsibility, leaving the student without an essential service and an unsafe living condition.\\n\\nCould you please intervene with the landlord to ensure the water supply is restored promptly, and advise the student on any immediate steps they can take for temporary accommodations if the issue cannot be resolved quickly?\\n\\nThank you for your assistance.\\n\\nSincerely,\\n[Student Support Team]\",\"office\":\"off_campus_housing\",\"subject\":\"Urgent: No Running Water – Landlord Unresponsive\",\"ticketId\":\"T-a0b98a99\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 345,
+            "waitMs": 752,
+            "usage": {
+              "input": 1515,
+              "output": 55
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-housemate-screaming",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [],
+            "sourceIds": [
+              "before-you-rent-11",
+              "before-you-rent-16",
+              "know-your-rights-8",
+              "before-you-rent-14",
+              "before-you-rent-15"
+            ],
+            "faqScores": [],
+            "sourceScores": [
+              8.77,
+              8.02,
+              7.99,
+              7.23,
+              7.23
+            ],
+            "ms": 1.7116
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [],
+            "sourceIds": [
+              "before-you-rent-11",
+              "before-you-rent-16",
+              "know-your-rights-8",
+              "before-you-rent-14",
+              "before-you-rent-15"
+            ],
+            "faqScores": [],
+            "sourceScores": [
+              8.77,
+              8.02,
+              7.99,
+              7.23,
+              7.23
+            ],
+            "ms": 2.7095
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 1.6207
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "harassment",
+              "priority": "high",
+              "summary": "Housemate repeatedly takes student's belongings and screams, making the student feel unsafe and uncomfortable."
+            },
+            "error": null,
+            "priority": "high"
+          },
+          {
+            "tool": "escalate_ticket",
+            "args": {
+              "reason": "Ongoing harassment by housemate causing safety concerns",
+              "ticketId": "T-a2de4214"
+            },
+            "error": null,
+            "priority": null
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off‑Campus Housing Team,\n\nI am writing on behalf of a student who is currently experiencing ongoing harassment from a housemate. The housemate repeatedly takes the student's personal belongings and screams at them, creating an environment where the student no longer feels safe or comfortable living in the residence. The student has expressed a desire to find alternative housing or receive mediation support.\n\nCould you please advise on the next steps for addressing this situation, including any options for emergency relocation, mediation services, or legal resources available through the university?\n\nThank you for your prompt assistance.\n\nSincerely,\n[Student Support Team]",
+              "office": "off_campus_housing",
+              "subject": "Urgent: Harassment by housemate – safety concerns and request for assistance",
+              "ticketId": "T-a2de4214"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "escalate_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 4,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "high",
+            "escalated": true,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 2555.528100000003,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1073,
+            "waitMs": 1,
+            "usage": {
+              "input": 846,
+              "output": 376
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"harassment\",\"priority\":\"high\",\"summary\":\"Housemate repeatedly takes student's belongings and screams, making the student feel unsafe and uncomfortable.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 374,
+            "waitMs": 3198,
+            "usage": {
+              "input": 1238,
+              "output": 46
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "escalate_ticket",
+                "arguments": "{\"reason\":\"Ongoing harassment by housemate causing safety concerns\",\"ticketId\":\"T-a2de4214\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 734,
+            "waitMs": 53241,
+            "usage": {
+              "input": 1323,
+              "output": 204
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off‑Campus Housing Team,\\n\\nI am writing on behalf of a student who is currently experiencing ongoing harassment from a housemate. The housemate repeatedly takes the student's personal belongings and screams at them, creating an environment where the student no longer feels safe or comfortable living in the residence. The student has expressed a desire to find alternative housing or receive mediation support.\\n\\nCould you please advise on the next steps for addressing this situation, including any options for emergency relocation, mediation services, or legal resources available through the university?\\n\\nThank you for your prompt assistance.\\n\\nSincerely,\\n[Student Support Team]\",\"office\":\"off_campus_housing\",\"subject\":\"Urgent: Harassment by housemate – safety concerns and request for assistance\",\"ticketId\":\"T-a2de4214\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 373,
+            "waitMs": 1070,
+            "usage": {
+              "input": 1556,
+              "output": 58
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-draft-och-mold",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-find-off-campus-housing",
+              "faq-tenant-rights",
+              "faq-legal-support",
+              "faq-on-campus-housing"
+            ],
+            "sourceIds": [
+              "help-waterloo-1",
+              "looking-for-place-3",
+              "looking-for-place-1",
+              "help-waterloo-2",
+              "guide-ontarios-standard-lease-15"
+            ],
+            "faqScores": [
+              12.6,
+              9.07,
+              8.8,
+              5.86,
+              5.44
+            ],
+            "sourceScores": [
+              18.39,
+              13.21,
+              10.66,
+              10.06,
+              9.51
+            ],
+            "ms": 1.7493
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-utilities",
+              "faq-find-off-campus-housing",
+              "faq-tenant-rights",
+              "faq-mental-health"
+            ],
+            "sourceIds": [
+              "help-waterloo-1",
+              "looking-for-place-3",
+              "looking-for-place-1",
+              "help-waterloo-2",
+              "guide-ontarios-standard-lease-15"
+            ],
+            "faqScores": [
+              12.6,
+              10.22,
+              9.07,
+              8.8,
+              8.12
+            ],
+            "sourceScores": [
+              18.39,
+              13.21,
+              10.66,
+              10.06,
+              9.51
+            ],
+            "ms": 2.7967
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.2088
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "landlord_dispute",
+              "priority": "high",
+              "summary": "Landlord has not addressed mold in student's room for six weeks."
+            },
+            "error": null,
+            "priority": "high"
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off-Campus Housing Team,\n\nI am writing on behalf of a student who has been experiencing a persistent mold problem in their room. The landlord has not taken any action to remediate the issue despite six weeks having passed since it was first reported. This situation is affecting the student's health and wellbeing.\n\nCould you please reach out to the landlord on the student's behalf to expedite the mold remediation and ensure the living environment is safe?\n\nThank you for your assistance.\n\nSincerely,\n[Student Support Team]",
+              "office": "off_campus_housing",
+              "subject": "Assistance needed: mold not addressed by landlord",
+              "ticketId": "T-146fe5c8"
+            },
+            "error": null,
+            "priority": null
+          },
+          {
+            "tool": "escalate_ticket",
+            "args": {
+              "reason": "Health hazard due to unresolved mold; landlord unresponsive for six weeks, posing risk to student's wellbeing.",
+              "ticketId": "T-146fe5c8"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          },
+          {
+            "name": "escalate_ticket",
+            "problems": []
+          }
+        ],
+        "modelTurns": 4,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "high",
+            "escalated": true,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 2650.140800000001,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 985,
+            "waitMs": 0,
+            "usage": {
+              "input": 853,
+              "output": 349
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"landlord_dispute\",\"priority\":\"high\",\"summary\":\"Landlord has not addressed mold in student's room for six weeks.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 602,
+            "waitMs": 3261,
+            "usage": {
+              "input": 1219,
+              "output": 205
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off-Campus Housing Team,\\n\\nI am writing on behalf of a student who has been experiencing a persistent mold problem in their room. The landlord has not taken any action to remediate the issue despite six weeks having passed since it was first reported. This situation is affecting the student's health and wellbeing.\\n\\nCould you please reach out to the landlord on the student's behalf to expedite the mold remediation and ensure the living environment is safe?\\n\\nThank you for your assistance.\\n\\nSincerely,\\n[Student Support Team]\",\"office\":\"off_campus_housing\",\"subject\":\"Assistance needed: mold not addressed by landlord\",\"ticketId\":\"T-146fe5c8\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 349,
+            "waitMs": 53017,
+            "usage": {
+              "input": 1450,
+              "output": 61
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "escalate_ticket",
+                "arguments": "{\"reason\":\"Health hazard due to unresolved mold; landlord unresponsive for six weeks, posing risk to student's wellbeing.\",\"ticketId\":\"T-146fe5c8\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 711,
+            "waitMs": 1450,
+            "usage": {
+              "input": 1551,
+              "output": 48
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-draft-legal-clinic",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-legal-support",
+              "faq-landlord-maintenance",
+              "faq-tenant-rights"
+            ],
+            "sourceIds": [
+              "renting-ontario-your-rights-13",
+              "signing-lease-13",
+              "resources-4",
+              "guide-ontarios-standard-lease-18",
+              "know-your-rights-1"
+            ],
+            "faqScores": [
+              12.2,
+              7.76,
+              5.7
+            ],
+            "sourceScores": [
+              10.62,
+              9.47,
+              9.45,
+              8.01,
+              7.61
+            ],
+            "ms": 1.6698
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-legal-support",
+              "faq-utilities",
+              "faq-landlord-maintenance",
+              "faq-tenant-rights",
+              "faq-health-emergencies"
+            ],
+            "sourceIds": [
+              "renting-ontario-your-rights-13",
+              "signing-lease-13",
+              "resources-4",
+              "guide-ontarios-standard-lease-18",
+              "know-your-rights-1"
+            ],
+            "faqScores": [
+              12.2,
+              9.4,
+              7.76,
+              5.7,
+              5.33
+            ],
+            "sourceScores": [
+              10.62,
+              9.47,
+              9.45,
+              8.01,
+              7.61
+            ],
+            "ms": 3.697
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.1744
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "landlord_dispute",
+              "priority": "normal",
+              "summary": "Landlord retaining full security deposit; student requests legal clinic contact."
+            },
+            "error": null,
+            "priority": "normal"
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Community Legal Services,\n\nThe student has reported that their landlord is withholding the entire security deposit and they are unsure of how to proceed. They would like the legal clinic to contact them to discuss their options and possible next steps.\n\nPlease reach out to the student at your earliest convenience.\n\nThank you.",
+              "office": "community_legal_services",
+              "subject": "Assistance needed with security deposit dispute",
+              "ticketId": "T-31f4e312"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 3,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "normal",
+            "escalated": false,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 2270.8505000000005,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 934,
+            "waitMs": 0,
+            "usage": {
+              "input": 846,
+              "output": 274
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"landlord_dispute\",\"priority\":\"normal\",\"summary\":\"Landlord retaining full security deposit; student requests legal clinic contact.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 582,
+            "waitMs": 2984,
+            "usage": {
+              "input": 1137,
+              "output": 139
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Community Legal Services,\\n\\nThe student has reported that their landlord is withholding the entire security deposit and they are unsure of how to proceed. They would like the legal clinic to contact them to discuss their options and possible next steps.\\n\\nPlease reach out to the student at your earliest convenience.\\n\\nThank you.\",\"office\":\"community_legal_services\",\"subject\":\"Assistance needed with security deposit dispute\",\"ticketId\":\"T-31f4e312\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 753,
+            "waitMs": 53031,
+            "usage": {
+              "input": 1314,
+              "output": 69
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-draft-wellness",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "health_safety",
+            "faqIds": [],
+            "sourceIds": [],
+            "faqScores": [],
+            "sourceScores": [],
+            "ms": 2.2734
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [],
+            "sourceIds": [
+              "help-waterloo-7",
+              "before-you-rent-9",
+              "before-you-rent-18",
+              "looking-for-place-1"
+            ],
+            "faqScores": [],
+            "sourceScores": [
+              10.07,
+              7.91,
+              6.74,
+              6.49
+            ],
+            "ms": 4.0967
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.2416
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "health_safety",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "harassment",
+              "priority": "normal",
+              "summary": "Student is struggling with roommate situation and requests contact from Campus Wellness."
+            },
+            "error": null,
+            "priority": "normal"
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Campus Wellness Team,\n\nA student has reached out expressing that they are struggling with their current roommate situation and would like someone from your office to get in touch with them for support. Please contact the student at their earliest convenience to discuss the issue and provide appropriate resources.\n\nThank you,\nOff‑Campus Student Support",
+              "office": "campus_wellness",
+              "subject": "Student request for support regarding roommate situation",
+              "ticketId": "T-5d01b6ca"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 3,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "normal",
+            "escalated": false,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 2586.1047,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 1485,
+            "waitMs": 0,
+            "usage": {
+              "input": 845,
+              "output": 333
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"harassment\",\"priority\":\"normal\",\"summary\":\"Student is struggling with roommate situation and requests contact from Campus Wellness.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 820,
+            "waitMs": 0,
+            "usage": {
+              "input": 1196,
+              "output": 158
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Campus Wellness Team,\\n\\nA student has reached out expressing that they are struggling with their current roommate situation and would like someone from your office to get in touch with them for support. Please contact the student at their earliest convenience to discuss the issue and provide appropriate resources.\\n\\nThank you,\\nOff‑Campus Student Support\",\"office\":\"campus_wellness\",\"subject\":\"Student request for support regarding roommate situation\",\"ticketId\":\"T-5d01b6ca\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 281,
+            "waitMs": 0,
+            "usage": {
+              "input": 1378,
+              "output": 46
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-draft-housing-entry",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-tenant-rights",
+              "faq-landlord-maintenance",
+              "faq-legal-support"
+            ],
+            "sourceIds": [
+              "know-your-rights-5",
+              "signing-lease-3"
+            ],
+            "faqScores": [
+              9.55,
+              9.27,
+              7.05
+            ],
+            "sourceScores": [
+              13.34,
+              6.97
+            ],
+            "ms": 1.6855
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-tenant-rights",
+              "faq-landlord-maintenance",
+              "faq-legal-support",
+              "faq-food-support"
+            ],
+            "sourceIds": [
+              "know-your-rights-5",
+              "signing-lease-3"
+            ],
+            "faqScores": [
+              9.55,
+              9.27,
+              7.05,
+              6.01
+            ],
+            "sourceScores": [
+              13.34,
+              6.97
+            ],
+            "ms": 1.0441
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.1484
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [
+          {
+            "tool": "create_ticket",
+            "args": {
+              "category": "landlord_dispute",
+              "priority": "normal",
+              "summary": "Landlord entered the student's unit without notice, repeated incident."
+            },
+            "error": null,
+            "priority": "normal"
+          },
+          {
+            "tool": "draft_followup_email",
+            "args": {
+              "body": "Dear Off-Campus Housing Office,\n\nI am writing on behalf of a student who has reported that their landlord entered their rental unit without prior notice. This incident occurred today and is not the first time it has happened. The student is seeking guidance and assistance to address this repeated violation of their privacy and tenancy rights.\n\nCould you please reach out to the student to discuss next steps, including any possible mediation, legal resources, or enforcement actions?\n\nThank you for your prompt attention to this matter.\n\nSincerely,\nStudent Support Team",
+              "office": "off_campus_housing",
+              "subject": "Repeated unauthorized entry by landlord",
+              "ticketId": "T-25c15a84"
+            },
+            "error": null,
+            "priority": null
+          }
+        ],
+        "rawToolCalls": [
+          {
+            "name": "create_ticket",
+            "problems": []
+          },
+          {
+            "name": "draft_followup_email",
+            "problems": []
+          }
+        ],
+        "modelTurns": 3,
+        "agentError": null,
+        "tickets": [
+          {
+            "priority": "normal",
+            "escalated": false,
+            "drafts": 1
+          }
+        ],
+        "totalMs": 1674.3248999999996,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 750,
+            "waitMs": 3081,
+            "usage": {
+              "input": 844,
+              "output": 257
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "create_ticket",
+                "arguments": "{\"category\":\"landlord_dispute\",\"priority\":\"normal\",\"summary\":\"Landlord entered the student's unit without notice, repeated incident.\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 674,
+            "waitMs": 52868,
+            "usage": {
+              "input": 1118,
+              "output": 207
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": [
+              {
+                "name": "draft_followup_email",
+                "arguments": "{\"body\":\"Dear Off-Campus Housing Office,\\n\\nI am writing on behalf of a student who has reported that their landlord entered their rental unit without prior notice. This incident occurred today and is not the first time it has happened. The student is seeking guidance and assistance to address this repeated violation of their privacy and tenancy rights.\\n\\nCould you please reach out to the student to discuss next steps, including any possible mediation, legal resources, or enforcement actions?\\n\\nThank you for your prompt attention to this matter.\\n\\nSincerely,\\nStudent Support Team\",\"office\":\"off_campus_housing\",\"subject\":\"Repeated unauthorized entry by landlord\",\"ticketId\":\"T-25c15a84\"}"
+              }
+            ]
+          },
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 249,
+            "waitMs": 255,
+            "usage": {
+              "input": 1350,
+              "output": 38
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-none-inspection-notice",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-tenant-rights"
+            ],
+            "sourceIds": [
+              "know-your-rights-5",
+              "guide-ontarios-standard-lease-5",
+              "residential-rent-increases-2",
+              "residential-rent-increases-6",
+              "renting-ontario-your-rights-3"
+            ],
+            "faqScores": [
+              7.28,
+              6.74
+            ],
+            "sourceScores": [
+              10.49,
+              9.1,
+              8.23,
+              7.89,
+              7.36
+            ],
+            "ms": 2.4167
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-tenant-rights",
+              "faq-utilities"
+            ],
+            "sourceIds": [
+              "know-your-rights-5",
+              "guide-ontarios-standard-lease-5",
+              "residential-rent-increases-2",
+              "residential-rent-increases-6",
+              "renting-ontario-your-rights-3"
+            ],
+            "faqScores": [
+              7.28,
+              6.74,
+              5.22
+            ],
+            "sourceScores": [
+              10.49,
+              9.1,
+              8.23,
+              7.89,
+              7.36
+            ],
+            "ms": 2.5714
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.3142
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [],
+        "rawToolCalls": [],
+        "modelTurns": 1,
+        "agentError": null,
+        "tickets": [],
+        "totalMs": 570.1418000000001,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 570,
+            "waitMs": 1061,
+            "usage": {
+              "input": 838,
+              "output": 58
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-none-who-pays-repairs",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-tenant-rights"
+            ],
+            "sourceIds": [
+              "guide-ontarios-standard-lease-15",
+              "renting-ontario-your-rights-5"
+            ],
+            "faqScores": [
+              8.48,
+              8.04
+            ],
+            "sourceScores": [
+              6.73,
+              6.41
+            ],
+            "ms": 2.279
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-landlord-maintenance",
+              "faq-tenant-rights",
+              "faq-emergency-contacts"
+            ],
+            "sourceIds": [
+              "guide-ontarios-standard-lease-15",
+              "renting-ontario-your-rights-5"
+            ],
+            "faqScores": [
+              8.48,
+              8.04,
+              5.34
+            ],
+            "sourceScores": [
+              6.73,
+              6.41
+            ],
+            "ms": 2.0452
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.1665
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [],
+        "rawToolCalls": [],
+        "modelTurns": 1,
+        "agentError": null,
+        "tickets": [],
+        "totalMs": 769.2028,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 769,
+            "waitMs": 265,
+            "usage": {
+              "input": 837,
+              "output": 60
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-none-eviction-options",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [],
+            "sourceIds": [
+              "renting-ontario-your-rights-7"
+            ],
+            "faqScores": [],
+            "sourceScores": [
+              7.25
+            ],
+            "ms": 1.3587
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [],
+            "sourceIds": [
+              "renting-ontario-your-rights-7"
+            ],
+            "faqScores": [],
+            "sourceScores": [
+              7.25
+            ],
+            "ms": 2.2857
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 1.1258
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [],
+        "rawToolCalls": [],
+        "modelTurns": 1,
+        "agentError": null,
+        "tickets": [],
+        "totalMs": 243.21410000000014,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 244,
+            "waitMs": 2573,
+            "usage": {
+              "input": 839,
+              "output": 67
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-none-wellness-workshops",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "health_safety",
+            "faqIds": [
+              "faq-mental-health",
+              "faq-health-services",
+              "faq-health-insurance"
+            ],
+            "sourceIds": [],
+            "faqScores": [
+              11.93,
+              7.49,
+              6
+            ],
+            "sourceScores": [],
+            "ms": 0.8943
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-mental-health",
+              "faq-health-services",
+              "faq-health-insurance",
+              "faq-clubs-activities",
+              "faq-find-off-campus-housing"
+            ],
+            "sourceIds": [
+              "help-waterloo-7",
+              "looking-for-place-4"
+            ],
+            "faqScores": [
+              11.93,
+              7.49,
+              6,
+              5.49,
+              5.43
+            ],
+            "sourceScores": [
+              12.71,
+              7.74
+            ],
+            "ms": 2.5944
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.183
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "health_safety",
+        "tools": [],
+        "rawToolCalls": [],
+        "modelTurns": 1,
+        "agentError": null,
+        "tickets": [],
+        "totalMs": 619.3699,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 619,
+            "waitMs": 0,
+            "usage": {
+              "input": 836,
+              "output": 57
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-none-postdated-cheques",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [],
+            "sourceIds": [
+              "know-your-rights-2",
+              "looking-for-place-1"
+            ],
+            "faqScores": [],
+            "sourceScores": [
+              12.35,
+              6.62
+            ],
+            "ms": 2.8507
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [],
+            "sourceIds": [
+              "know-your-rights-2",
+              "looking-for-place-1"
+            ],
+            "faqScores": [],
+            "sourceScores": [
+              12.35,
+              6.62
+            ],
+            "ms": 1.6712
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.2054
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [],
+        "rawToolCalls": [],
+        "modelTurns": 1,
+        "agentError": null,
+        "tickets": [],
+        "totalMs": 312.29409999999916,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 313,
+            "waitMs": 52737,
+            "usage": {
+              "input": 840,
+              "output": 67
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "fresh-tool-none-viewing-checklist",
+      "offline": {
+        "retrieval": {
+          "goldIntent": {
+            "intent": "housing",
+            "faqIds": [
+              "faq-find-off-campus-housing"
+            ],
+            "sourceIds": [
+              "know-your-rights-7",
+              "frauds-and-scams-2"
+            ],
+            "faqScores": [
+              10.5
+            ],
+            "sourceScores": [
+              9.08,
+              6.63
+            ],
+            "ms": 2.6322
+          },
+          "ungated": {
+            "intent": null,
+            "faqIds": [
+              "faq-find-off-campus-housing"
+            ],
+            "sourceIds": [
+              "know-your-rights-7",
+              "frauds-and-scams-2"
+            ],
+            "faqScores": [
+              10.5
+            ],
+            "sourceScores": [
+              9.08,
+              6.63
+            ],
+            "ms": 1.3398
+          }
+        },
+        "rules": {
+          "crisis": null,
+          "crisisMatch": null,
+          "escalates": false,
+          "ms": 0.2581
+        }
+      },
+      "attempts": 1,
+      "error": null,
+      "live": {
+        "intent": "housing",
+        "tools": [],
+        "rawToolCalls": [],
+        "modelTurns": 1,
+        "agentError": null,
+        "tickets": [],
+        "totalMs": 369.04780000000005,
+        "llm": [
+          {
+            "stage": "action",
+            "model": "openai/gpt-oss-120b",
+            "ms": 369,
+            "waitMs": 598,
+            "usage": {
+              "input": 837,
+              "output": 59
+            },
+            "error": null,
+            "malformed": [],
+            "toolCalls": []
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -42,10 +42,13 @@ async function applyCritic({ message, intent, routerConfidence, matchType, botRe
     actions.push({ tool: 'escalate_ticket', args: { ticketId: created.ticketId, reason }, result: escalated, forcedByCritic: true });
   }
 
+  // The student's words are already in `messages` (same session and time), and
+  // nothing reads them from here, so the critic log doesn't keep a second copy
+  // of what can be crisis text. The column stays, empty, for schema compatibility.
   await db.run(
     `INSERT INTO critic_log (session_id, timestamp, message, intent, router_confidence, match_type, flags_json, reasoning)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [sessionId, now(), message, intent, routerConfidence, matchType, JSON.stringify(decision.flags), decision.reasoning]
+    [sessionId, now(), '', intent, routerConfidence, matchType, JSON.stringify(decision.flags), decision.reasoning]
   );
 
   return { response: decision.response, actionsTaken: actions, flags: decision.flags, reasoning: decision.reasoning };
@@ -57,7 +60,40 @@ async function applyCritic({ message, intent, routerConfidence, matchType, botRe
 // payload. Same code path either way, so the eval exercises what users get.
 // ---------------------------------------------------------------------------
 
-async function runPipeline({ message, sessionId: incomingSessionId, emit = () => {} }) {
+// Session ids double as the credential for reading a conversation, so logs
+// carry a short one-way hash that still groups a session's requests.
+const sessionRef = sessionId => crypto.createHash('sha256').update(sessionId).digest('hex').slice(0, 12);
+
+// One structured line per request: enough to diagnose routing, retrieval,
+// tool and escalation problems, and none of the student's words.
+function requestLog({ requestId, sessionId, message, routerResult, intent, crisis, preCheckOverride, retrieved, citations, actions, flags, matchType, source, metadata, trace, startedAt, escalated, staffAlerted }) {
+  return {
+    event: 'chat_request',
+    requestId,
+    session: sessionRef(sessionId),
+    at: new Date(startedAt).toISOString(),
+    chars: message.length,
+    routerIntent: routerResult?.intent ?? null,
+    routerConfidence: routerResult?.confidence ?? null,
+    incident: routerResult?.incident ?? null,
+    intent,
+    crisis: crisis?.id || null,
+    criticOverride: !!preCheckOverride,
+    matchType,
+    source,
+    retrieved: retrieved ? { faqIds: retrieved.faqIds, sourceIds: retrieved.sources.map(s => s.id), scores: retrieved.scores } : null,
+    cited: citations.filter(c => c.cited).map(c => c.id),
+    tools: actions.map(a => ({ tool: a.tool, forcedByCritic: !!a.forcedByCritic, ok: !a.result?.error })),
+    escalated,
+    staffAlerted,
+    criticFlags: Object.keys(flags).filter(k => flags[k]),
+    modelFallback: metadata?.error === 'groq_failed',
+    latencyMs: { total: Date.now() - startedAt, ...Object.fromEntries(trace.filter(s => s.ms !== undefined).map(s => [s.stage, s.ms])) }
+  };
+}
+
+async function runPipeline({ message, sessionId: incomingSessionId, emit = () => {}, requestId = crypto.randomUUID() }) {
+  const startedAt = Date.now();
   // A session id ties messages/tickets/critic decisions together. The client
   // sends back whatever id we gave it last time; if it sends none (first
   // message, or storage was cleared), a new one is minted and returned.
@@ -80,7 +116,7 @@ async function runPipeline({ message, sessionId: incomingSessionId, emit = () =>
 
   // Message text stays out of the logs: they're kept by the host on a
   // different schedule from the database, and messages can hold crisis details.
-  console.log('Processing message:', { chars: message.length, memoryTurns: history.length });
+  console.log(JSON.stringify({ event: 'chat_start', requestId, session: sessionRef(sessionId), chars: message.length, memoryTurns: history.length }));
 
   // Stage 1: route before any retrieval. Null means the router itself
   // failed (Groq error/bad JSON) — treat that like the old ungated flow.
@@ -103,6 +139,7 @@ async function runPipeline({ message, sessionId: incomingSessionId, emit = () =>
   const crisis = pre.crisis;
 
   let botResponse, source, metadata, category, matchType, citations = [];
+  let retrieved = null;
   const onToken = text => emit({ type: 'token', text });
 
   if (intent === 'urgent') {
@@ -126,10 +163,9 @@ async function runPipeline({ message, sessionId: incomingSessionId, emit = () =>
   } else {
     // In-scope intent (or router failed and intent is null) — hand off to
     // the retrieval agent.
-    let retrieved = null;
     const result = await stage(
       'retrieval',
-      () => retrievalAgent(message, intent, { history, onToken, onRetrieved: r => { retrieved = r; emit({ type: 'retrieved', ...r }); } }),
+      () => retrievalAgent(message, intent, { history, crisis, onToken, onRetrieved: r => { retrieved = r; emit({ type: 'retrieved', ...r }); } }),
       r => ({ faqs: retrieved?.faqs || [], sources: retrieved?.sources || [], matchType: r.matchType, groqFailed: r.metadata?.error === 'groq_failed' })
     );
     botResponse = result.response;
@@ -178,9 +214,13 @@ async function runPipeline({ message, sessionId: incomingSessionId, emit = () =>
 
   const escalated = actions.some(a => a.tool === 'escalate_ticket' && a.result?.escalated);
   const staffAlerted = actions.some(a => a.tool === 'escalate_ticket' && a.result?.staffAlerted);
-  console.log('Sending response:', { source, intent, matchType, escalated, criticFlags: reviewed.flags });
+  console.log(JSON.stringify(requestLog({
+    requestId, sessionId, message, routerResult, intent, crisis, preCheckOverride, retrieved, citations,
+    actions, flags: reviewed.flags, matchType, source, metadata, trace, startedAt, escalated, staffAlerted
+  })));
 
   return {
+    requestId,
     response: botResponse,
     sessionId,
     history: recent,

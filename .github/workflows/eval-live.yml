@@ -1,0 +1,88 @@
+name: Live LLM eval
+
+# Calls the Groq API hundreds of times, so it never runs on pull requests.
+# Manual runs choose the mode and scope; the weekly run checks the router for
+# drift on the provider's side (the model behind the same name can change).
+#
+# Requires a repository secret GROQ_API_KEY_EVAL. Use a separate key from the
+# one the deployed app uses: a full router run is ~170k tokens, which on
+# Groq's free tier is most of a day's quota and would otherwise take the
+# production app down for the rest of the day.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: router (1 call per case) or pipeline (full answers + tools, ~5-10x the tokens)
+        type: choice
+        options: [router, pipeline]
+        default: router
+      split:
+        description: Dataset split (blank = all)
+        required: false
+        default: ''
+      category:
+        description: Comma-separated categories (blank = all). For pipeline mode, e.g. tool_incident,safety_crisis
+        required: false
+        default: ''
+      limit:
+        description: Max cases (blank = no limit)
+        required: false
+        default: ''
+  schedule:
+    - cron: '0 7 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-eval
+  cancel-in-progress: false
+
+jobs:
+  live-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      HAS_KEY: ${{ secrets.GROQ_API_KEY_EVAL != '' }}
+    steps:
+      - name: Skip without an eval key
+        if: env.HAS_KEY != 'true'
+        run: echo "::notice::GROQ_API_KEY_EVAL is not set; skipping the live eval."
+      - uses: actions/checkout@v4
+        if: env.HAS_KEY == 'true'
+      - uses: actions/setup-node@v4
+        if: env.HAS_KEY == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        if: env.HAS_KEY == 'true'
+      - name: Run live eval
+        if: env.HAS_KEY == 'true'
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY_EVAL }}
+          MODE: ${{ inputs.mode || 'router' }}
+          SPLIT: ${{ inputs.split }}
+          CATEGORY: ${{ inputs.category }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          args=(--mode "$MODE")
+          [ -n "$SPLIT" ] && args+=(--split "$SPLIT")
+          [ -n "$CATEGORY" ] && args+=(--category "$CATEGORY")
+          [ -n "$LIMIT" ] && args+=(--limit "$LIMIT")
+          node eval/run.js "${args[@]}" --out eval/results/live
+      - name: Compare with baseline
+        # Only meaningful for a full, unfiltered run; filtered runs just report.
+        if: env.HAS_KEY == 'true' && inputs.split == '' && inputs.category == '' && inputs.limit == ''
+        run: node eval/compare.js --mode "${{ inputs.mode || 'router' }}" --results eval/results/live/eval-results.json
+      - name: Upload results
+        if: always() && env.HAS_KEY == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-eval-${{ inputs.mode || 'router' }}
+          path: backend/eval/results/live/
+          if-no-files-found: ignore
