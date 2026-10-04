@@ -2,6 +2,12 @@
 
 An AI assistant for University of Waterloo students living off campus. It answers housing, rent, transit, health, and food questions with **citations to official UW and Ontario pages**, checks leases for **clauses Ontario says are void**, flags **rental-listing scams**, and hands real problems to **a human through a staff queue**. Every part of the chat pipeline is measured by a **387-case labeled evaluation** that runs in CI.
 
+**Key results** (held-out "fresh" split unless noted; details in [§8](#8-measured-results) and [`docs/RESUME_EVIDENCE.md`](docs/RESUME_EVIDENCE.md)):
+- Full pipeline: **19 of 20** crisis messages reach staff (95% recall, 76% precision), zero hallucinated tool calls.
+- Action agent: tool-selection accuracy **81% → 92%** after fixing over-escalation (routine tickets paging staff 7/12 → 2/12), with no missed escalations, re-verified end to end.
+- Retrieval: BM25 kept over a better-ranking hybrid after an A/B showed half the gain came from cut-offs and the embedding runtime won't fit Vercel's 250 MB function limit.
+- 159 automated tests and a deterministic eval regression gate on every PR.
+
 **Live demo:** https://occ-chatbot-36q6.vercel.app/ · **Backend API:** [occ-chatbot.vercel.app](https://occ-chatbot.vercel.app)
 
 [![CI](https://github.com/Jivesh2816/OCC-CHATBOT/actions/workflows/ci.yml/badge.svg)](https://github.com/Jivesh2816/OCC-CHATBOT/actions/workflows/ci.yml) ![Node](https://img.shields.io/badge/Node_22-Express-000?logo=node.js&logoColor=white) ![React](https://img.shields.io/badge/React_18-Vite-149eca?logo=react&logoColor=white) ![Groq](https://img.shields.io/badge/Groq-GPT--OSS_120B-orange) ![SQLite](https://img.shields.io/badge/SQLite-Turso%2FlibSQL-003B57?logo=sqlite&logoColor=white) ![Vercel](https://img.shields.io/badge/Deploy-Vercel-black?logo=vercel&logoColor=white)
@@ -90,7 +96,7 @@ Any crisis or housing emergency, from either layer, opens and escalates a ticket
 
 ## 8. Measured results
 
-Model `openai/gpt-oss-120b` on Groq, runs of 2026-09-30 to 2026-10-03. Reports: [`docs/eval/`](docs/eval/) (its index lists each command). [`docs/RESUME_EVIDENCE.md`](docs/RESUME_EVIDENCE.md) separates what's claimable from what isn't.
+Model `openai/gpt-oss-120b` on Groq, runs of 2026-09-30 to 2026-10-04. Reports: [`docs/eval/`](docs/eval/) (its index lists each command). [`docs/RESUME_EVIDENCE.md`](docs/RESUME_EVIDENCE.md) separates what's claimable from what isn't.
 
 **Intent routing** (live router, original prompt, 317 labeled cases): **96.9%** accuracy counting defensible alternative intents, **87.1%** strict; macro-F1 **0.955**; 1 malformed output in 322 calls. Router confidence carries no signal: mean 0.98 when right, 0.99 when wrong. After the trust-boundary prompt change, the 135 safety-category cases score 94.8% (was 91.9%); the other cases haven't been re-run on the new prompt yet (quota).
 
